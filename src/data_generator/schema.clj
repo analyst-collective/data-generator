@@ -19,7 +19,9 @@
                  (let [type (:type fdata)
                        new-fdata (if (not= type "association")
                                    [field fdata]
-                                   (let [assoc-model (-> fdata :value :to keyword)
+                                   (let [assoc-type (or (:master fdata) (:select fdata))
+                                         ;; assoc-model (-> fdata :value :to keyword)
+                                         assoc-model (-> assoc-type :model keyword)
                                          assoc-model-field (assoc-model pkmap keyword)
                                          assoc-model-field-type (-> models
                                                                     assoc-model
@@ -39,13 +41,20 @@
 (defn add-type
   [col-spec fdata]
   (let [type (-> fdata :type s/lower-case)
+        value (:value fdata)
+        autoincrement? (when value
+                         (-> value :type s/lower-case (= "autoincrement")))
         normalized-type (cond
-                          (#{"int" "integer"} type) :integer
+                          (#{"int" "integer"} type) (if autoincrement?
+                                                      :serial
+                                                      :integer)
                           (#{"string" "text"} type) :text
                           (re-find  #"^(var)(char)?([\s]*)?(\(([\d]*)\))?$" type) :text
                           (#{"real" "float"} type) :real
                           (#{"double"} type) :double
-                          (#{"bigint" "biginteger"} type) :biginteger
+                          (#{"bigint" "biginteger"} type) (if autoincrement?
+                                                            :bigserial
+                                                            :biginteger)
                           (#{"date"} type) :date
                           (#{"datetime" "timestamp" "timestamp with timezone"} type) :timestamp-with-time-zone
                           (#{"bool" "boolean"} type) :boolean
@@ -112,7 +121,7 @@
         db-spec (:database config)]
     (-> models
         (associate-types pkmap)
-        filter-virtual
+        ;; filter-virtual  ; After data generation, drop virtual columns!
         create-format
         (run-commands db-spec))))
 
