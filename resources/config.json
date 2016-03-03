@@ -1,0 +1,205 @@
+{
+  "database": {
+    "user": "samprotas",
+    "dbtype": "postgresql",
+    "dbname": "data_generator",
+    "host": "localhost",
+    "port": 5432
+  },
+  "models": {
+    "salesperson": {
+      "source": "$self",
+      "model": {
+        "id": {
+          "primarykey": true,
+          "autoincrement": true,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "name"
+          }
+        },
+        "active": {
+          "type": "boolean",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "true": 9,
+              "false": 1
+            }
+          }
+        },
+        "created_at": {
+          "type": "datetime",
+          "value": {
+            "master": {
+              "min": 1000000000000,
+              "increment": 5184000000,
+              "count": 10
+            },
+            "type": "formula",
+            "properties": [{
+              "equation": "2 + 3 * x",
+              "randomness": 0.3
+            }, {
+              "start": 5,
+              "randomness": 0.6
+            }]
+          }
+        },
+        "updated_at": {
+          "type": "datetime",
+          "value": {
+            "type": "case",
+            "check": "$self.active",
+            "branches": {
+              "true": {
+                "type": "distribution",
+                "properties": {
+                  "mean": "$self.created_at + 30000",
+                  "std": 15000,
+                  "constraint": {
+                    "min": "$self.created_at + 100000",
+                    "offset": 100000
+                  }
+                }
+              },
+              "false": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$self.created_at"
+                }
+              }
+            }
+          }
+        },
+        "skill": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0,
+              "max": 10
+            }
+          }
+        }
+      }
+    },
+    "order": {
+      "source": "$self",
+      "model": {
+        "id": {
+          "primarykey": true,
+          "autoincrement": true,
+          "type": "integer"
+        },
+        "salesperson": {
+          "type": "association",
+          "value": {
+            "to": "salesperson",
+            "select": {
+              "field": "$model.id",
+              "filter": "$model.created_at < $self.created_at",
+              "weight": "$model.skill"
+            }
+          }
+        },
+        "created_at": {
+          "type": "datetime",
+          "value": {
+            "master": {
+              "min": 1000000000000,
+              "increment": 5184000000,
+              "count": 10
+            },
+            "type": "formula",
+            "properties": {
+              "equation": "x",
+              "randomness": 0.4
+            }
+          }
+        }
+      }
+    },
+    "item": {
+      "source": "$self",
+      "model": {
+        "id": {
+          "primarykey": true,
+          "autoincrement": true,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "commerce.product"
+          }
+        },
+        "price": {
+          "type": "integer",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 1,
+              "max": 150
+            }
+          }
+        },
+        "popularity": {
+          "virtual": true,
+          "type": "integer",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 1,
+              "max": 100
+            }
+          }
+        }
+      }
+    },
+    "order_item": {
+      "source": "order",
+      "model": {
+        "id": {
+          "primarykey": true,
+          "autoincrement": true,
+          "type": "integer"
+        },
+        "order": {
+          "type": "association",
+          "value": {
+            "to": "order",
+            "field": "id"
+          }
+        },
+        "item": {
+          "type": "association",
+          "value": {
+            "to": "item",
+            "select": {
+              "field": "$model.id",
+              "weight": "$model.popularity"
+            }
+          }
+        },
+        "quantity": {
+          "type": "integer",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "1": 7,
+              "2": 2,
+              "3": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
