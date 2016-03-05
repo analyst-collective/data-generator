@@ -38,29 +38,29 @@
     (conj col-spec :primary-key? true)
     col-spec))
 
-(defn add-type
-  [col-spec fdata]
-  (let [type (-> fdata :type s/lower-case)
-        value (:value fdata)
-        autoincrement? (when value
-                         (-> value :type s/lower-case (= "autoincrement")))
-        normalized-type (cond
-                          (#{"int" "integer"} type) (if autoincrement?
-                                                      :serial
-                                                      :integer)
-                          (#{"string" "text"} type) :text
-                          (re-find  #"^(var)(char)?([\s]*)?(\(([\d]*)\))?$" type) :text
-                          (#{"real" "float"} type) :real
-                          (#{"double"} type) :double
-                          (#{"bigint" "biginteger"} type) (if autoincrement?
-                                                            :bigserial
-                                                            :biginteger)
-                          (#{"date"} type) :date
-                          (#{"datetime" "timestamp" "timestamp with timezone"} type) :timestamp-with-time-zone
-                          (#{"bool" "boolean"} type) :boolean
-                              ; Throw error?
-                          :default "UNKNOWN")]
-    (conj col-spec normalized-type)))
+;; (defn add-type
+;;   [col-spec fdata]
+;;   (let [type (-> fdata :type s/lower-case)
+;;         value (:value fdata)
+;;         autoincrement? (when value
+;;                          (-> value :type s/lower-case (= "autoincrement")))
+;;         normalized-type (cond
+;;                           (#{"int" "integer"} type) (if autoincrement?
+;;                                                       :serial
+;;                                                       :integer)
+;;                           (#{"string" "text"} type) :text
+;;                           (re-find  #"^(var)(char)?([\s]*)?(\(([\d]*)\))?$" type) :text
+;;                           (#{"real" "float"} type) :real
+;;                           (#{"double"} type) :double
+;;                           (#{"bigint" "biginteger"} type) (if autoincrement?
+;;                                                             :bigserial
+;;                                                             :biginteger)
+;;                           (#{"date"} type) :date
+;;                           (#{"datetime" "timestamp" "timestamp with timezone"} type) :timestamp-with-time-zone
+;;                           (#{"bool" "boolean"} type) :boolean
+;;                               ; Throw error?
+;;                           :default "UNKNOWN")]
+;;     (conj col-spec normalized-type)))
 
 (defn create-format
   [injected-config]
@@ -69,7 +69,9 @@
                      [table (map
                              (fn [[field fdata]]
                                (-> [field]
-                                   (add-type fdata)
+                                   ;(add-type fdata)
+                                   ;; :type-norm
+                                   (conj (:type-norm fdata))
                                    (add-pk fdata)))
                              data)])
                    injected-config)))
