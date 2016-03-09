@@ -63,92 +63,112 @@
     (Double/parseDouble number)
     (symbol string)))
 
+(defmulti field-data* (fn [value _]
+                        (:type value)))
+
+(defmethod field-data* "autoincrement"
+  [value type-norm]
+  (fn [key this model & more]
+    this))
+
+(defmethod field-data* "enum"
+  [value type-norm]
+  (let [weights (:weights value)]
+    (fn [key this model & more]
+      (let [options (mapcat
+                     (fn [[k v]]
+                       (repeat (resolve-references v this model)
+                               (resolve-references (coerce k type-norm) this model)))
+                     weights)]
+        (assoc this key (resolve-references (rand-nth options) this model))))))
+
+(defmethod field-data* "range"
+  [value type-norm]
+  (let [minimum (or (-> value :properties :min) 0)
+        maximum (-> value :properties :max)]
+    (cond
+      (#{:bigserial :biginteger} type-norm) (fn [key this model & more]
+                                              (let [maximum (resolve-references maximum this model)
+                                                    minimum (resolve-references minimum this model)
+                                                    diff (-' maximum minimum)]
+                                                (assoc this
+                                                       key
+                                                       (-> diff rand bigint (+' minimum)))))
+      (#{:integer :serial} type-norm) (fn [key this model & more]
+                                        (let [maximum (resolve-references maximum this model)
+                                              minimum (resolve-references minimum this model)
+                                              diff (-' maximum minimum)]
+                                          (assoc this
+                                                 key
+                                                 (-> diff rand int (+ minimum)))))
+      (#{:real} type-norm) (fn [key this model & more]
+                             (let [maximum (resolve-references maximum this model)
+                                   minimum (resolve-references minimum this model)
+                                   diff (-' maximum minimum)]
+                               (assoc this
+                                      key
+                                      (-> diff rand float (+ minimum)))))
+      (#{:double} type-norm) (fn [key this model & more]
+                               (let [maximum (resolve-references maximum this model)
+                                     minimum (resolve-references minimum this model)
+                                     diff (-' maximum minimum)]
+                                 (assoc this
+                                        key
+                                        (-> diff rand (+ minimum))))))))
+
+(defmethod field-data* "faker"
+  [value type-norm]
+  (let [ns-and-function (:function value)
+        split (s/split ns-and-function #"\.")
+        ns (str "faker." (first split))
+        func (second split)
+        resolved (resolve (symbol ns func))
+        args (:args value)
+        real-fn (if-not (seq args)
+                  resolved
+                  (apply partial (cons resolved args)))]
+    (fn [key this model & more]
+      (assoc this
+             key
+             (real-fn)))))
+
+(defmethod field-data* "distribution"
+  [value type-norm]
+  (let [dist (-> value :properties :type)
+        arguments (or (-> value :properties :args) [])
+        resolved (resolve (symbol "id" dist))
+        real-fn (if-not (seq arguments)
+                  resolved
+                  (apply partial (cons resolved arguments)))]
+    (fn [key this model & more]
+      (let [resolved-args (map #(resolve-references % this model) arguments)
+            real-fn (if-not (seq resolved-args)
+                      resolved
+                      (apply partial (cons resolved resolved-args)))]
+        (println resolved real-fn)
+        (assoc this key (id/draw (real-fn)))))))
+
+(defmethod field-data* "formula"
+  [value type-norm]
+  (let [properties (:properties value)]
+    (fn [key this model & more]
+      (let [other (apply hash-map more)
+            properties (current-properties properties (:count other))
+            insert-x (s/replace (:equation properties) #"x" (-> other :count str))
+            equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
+            equation-split (s/split equation-replaced #"\s+")
+            equation-resolved (map #(resolve-references % this model) equation-split)
+            primitives (map str->primitive equation-resolved)]
+        (apply (functionize $=) primitives)))))
+
 ;; TODO make this a mutli-method to make clearer and allow for extensibility
 (defn field-data
   [fdata]
   (let [type-norm (:type-norm fdata)
+        association? (-> fdata :type s/lower-case (= "association"))
         val-type (-> fdata :value :type)]
-    (println "VALTYPE" val-type fdata)
-    (case val-type
-      "autoincrement" (fn [key this model & more]
-                        this) ; No need to do anything. The db will generate this field on insert
-      "enum" (let [weights (-> fdata :value :weights)]
-               (fn [key this model & more]
-                 (let [options (mapcat
-                                (fn [[k v]]
-                                  (repeat (resolve-references v this model)
-                                          (resolve-references (coerce k type-norm) this model)))
-                                weights)]
-                   (assoc this key (resolve-references (rand-nth options) this model)))))
-      "range" (let [minimum (or (-> fdata :value :properties :min) 0)
-                    maximum (-> fdata :value :properties :max)]
-                (cond
-                  (#{:bigserial :biginteger} type-norm) (fn [key this model & more]
-                                                     (let [maximum (resolve-references maximum this model)
-                                                           minimum (resolve-references minimum this model)
-                                                           diff (-' maximum minimum)]
-                                                       (assoc this
-                                                              key
-                                                              (-> diff rand bigint (+' minimum)))))
-                  (#{:integer :serial} type-norm) (fn [key this model & more]
-                                               (let [maximum (resolve-references maximum this model)
-                                                     minimum (resolve-references minimum this model)
-                                                     diff (-' maximum minimum)]
-                                                 (assoc this
-                                                        key
-                                                        (-> diff rand int (+ minimum)))))
-                  (#{:real} type-norm) (fn [key this model & more]
-                                    (let [maximum (resolve-references maximum this model)
-                                          minimum (resolve-references minimum this model)
-                                          diff (-' maximum minimum)]
-                                      (assoc this
-                                             key
-                                             (-> diff rand float (+ minimum)))))
-                  (#{:double} type-norm) (fn [key this model & more]
-                                      (let [maximum (resolve-references maximum this model)
-                                            minimum (resolve-references minimum this model)
-                                            diff (-' maximum minimum)]
-                                        (assoc this
-                                               key
-                                               (-> diff rand (+ minimum)))))))
-      "faker" (let [ns-and-function (-> fdata :value :function)
-                    split (s/split ns-and-function #"\.")
-                    ns (str "faker." (first split))
-                    func (second split)
-                    resolved (resolve (symbol ns func))
-                    args (-> fdata :value :args)
-                    real-fn (if-not (seq args)
-                              resolved
-                              (apply partial (cons resolved args)))]
-                (fn [key this model & more]
-                  (assoc this
-                         key
-                         (real-fn))))
-      "distribution" (let [dist (-> fdata :value :properties :type)
-                           arguments (or (-> fdata :value :properties :args) [])
-                           resolved (resolve (symbol "id" dist))
-                           _ (println fdata dist resolved)
-                           real-fn (if-not (seq arguments)
-                                     resolved
-                                     (apply partial (cons resolved arguments)))]
-                       (fn [key this model & more]
-                         (let [resolved-args (map #(resolve-references % this model) arguments)
-                               real-fn (if-not (seq resolved-args)
-                                         resolved
-                                         (apply partial (cons resolved resolved-args)))]
-                           (println resolved real-fn)
-                           (assoc this key (id/draw (real-fn))))))
-      "formula" (let [properties (-> fdata :value :properties)]
-                  (fn [key this model & more]
-                    (let [other (apply hash-map more)
-                          properties (current-properties properties (:count other))
-                          insert-x (s/replace (:equation properties) #"x" (-> other :count str))
-                          equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
-                          equation-split (s/split equation-replaced #"\s+")
-                          equation-resolved (map #(resolve-references % this model) equation-split)
-                          primitives (map str->primitive equation-resolved)]
-                      (apply (functionize $=) primitives))))
-      "association" (let [field (-> fdata :value :field)
+    (if association?
+      (let [field (-> fdata :value :field)
                           master? (:master fdata)]
                       (if master?
                         (fn [key this model & more]
@@ -156,7 +176,8 @@
                         (let [weight (-> fdata :value :select :weight)
                               query-filter (-> fdata :value :select :filter)]
                           (fn [key this model & more]
-                            "TO DO")))))))
+                            "TO DO"))))
+      (field-data* (:value fdata) type-norm))))
 
 (defn master-column
   [data]
@@ -173,14 +194,8 @@
                               (and (empty? (field deps))
                                    [field fdata]))
                             data)]
-    (println "FIELD" field "FDATA" fdata)
     (when field
       {:key field :fn (field-data fdata)})))
-
-(defn remove-field-dep-2
-  [deps field]
-  (println "DEPS" deps)
-  (reduce-kv #(assoc-in %1 [:field-deps %2] (disj %3 field)) deps deps))
 
 (defn remove-field-dep
   [deps remove-field]
@@ -196,19 +211,19 @@
 
 (defn build-model-generator
   ([data deps]
-   (build-model-generator data deps []))
-  ([data deps fn-list]
-   (if (empty? data)
+   (build-model-generator (:model data) deps []))
+  ([mdata deps fn-list]
+   (if (empty? mdata)
      fn-list
-     (let [new-item (or (master-column data)
-                        (independant-column data deps)
+     (let [new-item (or (master-column mdata)
+                        (independant-column mdata deps)
                         (throw (Exception. (str "Circular dependency!" deps))))
-           new-data (dissoc data (:key new-item))
+           new-mdata (dissoc mdata (:key new-item))
            new-deps (remove-field-dep deps (:key new-item))
            new-fn-list (conj fn-list
                              (partial (:fn new-item)
                                       (:key new-item)))]
-       (recur new-data new-deps new-fn-list)))))
+       (recur new-mdata new-deps new-fn-list)))))
 
 (defn add-generators
   [config dependencies]
