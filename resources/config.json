@@ -20,7 +20,7 @@
           "type": "string",
           "value": {
             "type": "faker",
-            "function": "name"
+            "function": "name.one-name"
           }
         },
         "active": {
@@ -100,10 +100,15 @@
           }
         },
         "salesperson": {
-          "type": "assocniation",
+          "type": "association",
           "select": {
             "model": "salesperson",
             "field": "id",
+            "filter": "$model.created_at < $self.created_at",
+            "weight": "skill"
+          },
+          "value": {
+            "model": "salesperson",
             "filter": "$model.created_at < $self.created_at",
             "weight": "skill"
           }
@@ -130,6 +135,9 @@
         "id": {
           "primarykey": true,
           "type": "integer",
+          "master": {
+            "count": 20
+          },
           "value": {
             "type": "autoincrement"
           }
@@ -138,7 +146,7 @@
           "type": "string",
           "value": {
             "type": "faker",
-            "function": "commerce.product"
+            "function": "name.first-name"
           }
         },
         "price": {
@@ -184,6 +192,9 @@
                 "max": 100
               }
             }
+          },
+          "value": {
+            "model": "order"
           }
         },
         "item": {
@@ -192,6 +203,12 @@
             "model": "item",
             "field": "id",
             "weight": "popularity"
+          },
+          "value": {
+            "model": "item",
+            "select": {
+              "weight": "popularity"
+            }
           }
         },
         "quantity": {
