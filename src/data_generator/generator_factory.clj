@@ -63,6 +63,7 @@
     (Double/parseDouble number)
     (symbol string)))
 
+;; TODO make this a mutli-method to make clearer and allow for extensibility
 (defn field-data
   [fdata]
   (let [type-norm (:type-norm fdata)
