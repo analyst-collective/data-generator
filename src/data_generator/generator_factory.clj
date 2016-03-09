@@ -66,54 +66,70 @@
 (defmulti field-data* (fn [value _]
                         (:type value)))
 
+(defmethod field-data* "case"
+  [value type-norm]
+  (let [result-fns (reduce-kv (fn [m res rvalue]
+                                (assoc m res (field-data* rvalue type-norm)))
+                              {}
+                              (:branches value))]
+    (fn [mkey this model & more]
+      (let [equation-replaced (s/replace (:check value) #"\s\^\s" " ** ")
+            equation-split (s/split equation-replaced #"\s+")
+            equation-resolved (map #(resolve-references % this model) equation-split)
+            primitives (map str->primitive equation-resolved)
+            evaluated (apply (functionize $=) primitives)
+            chosen-fn ((keyword evaluated) result-fns)
+            args (list* mkey this model more)]
+        (apply chosen-fn args)))))
+
 (defmethod field-data* "autoincrement"
   [value type-norm]
-  (fn [key this model & more]
+  (fn [mkey this model & more]
     this))
 
 (defmethod field-data* "enum"
   [value type-norm]
   (let [weights (:weights value)]
-    (fn [key this model & more]
+    (fn [mkey this model & more]
       (let [options (mapcat
                      (fn [[k v]]
                        (repeat (resolve-references v this model)
                                (resolve-references (coerce k type-norm) this model)))
                      weights)]
-        (assoc this key (resolve-references (rand-nth options) this model))))))
+        (assoc this mkey (resolve-references (rand-nth options) this model))))))
 
 (defmethod field-data* "range"
   [value type-norm]
   (let [minimum (or (-> value :properties :min) 0)
         maximum (-> value :properties :max)]
     (cond
-      (#{:bigserial :biginteger} type-norm) (fn [key this model & more]
+      (#{:bigserial :biginteger} type-norm) (fn [mkey this model & more]
                                               (let [maximum (resolve-references maximum this model)
                                                     minimum (resolve-references minimum this model)
                                                     diff (-' maximum minimum)]
                                                 (assoc this
-                                                       key
+                                                       mkey
                                                        (-> diff rand bigint (+' minimum)))))
-      (#{:integer :serial} type-norm) (fn [key this model & more]
+      (#{:integer :serial} type-norm) (fn [mkey this model & more]
                                         (let [maximum (resolve-references maximum this model)
                                               minimum (resolve-references minimum this model)
                                               diff (-' maximum minimum)]
                                           (assoc this
-                                                 key
+                                                 mkey
                                                  (-> diff rand int (+ minimum)))))
-      (#{:real} type-norm) (fn [key this model & more]
+      (#{:real} type-norm) (fn [mkey this model & more]
                              (let [maximum (resolve-references maximum this model)
                                    minimum (resolve-references minimum this model)
                                    diff (-' maximum minimum)]
                                (assoc this
-                                      key
+                                      mkey
                                       (-> diff rand float (+ minimum)))))
-      (#{:double} type-norm) (fn [key this model & more]
+      (#{:double} type-norm) (fn [mkey this model & more]
                                (let [maximum (resolve-references maximum this model)
                                      minimum (resolve-references minimum this model)
                                      diff (-' maximum minimum)]
                                  (assoc this
-                                        key
+                                        mkey
                                         (-> diff rand (+ minimum))))))))
 
 (defmethod field-data* "faker"
@@ -127,9 +143,9 @@
         real-fn (if-not (seq args)
                   resolved
                   (apply partial (cons resolved args)))]
-    (fn [key this model & more]
+    (fn [mkey this model & more]
       (assoc this
-             key
+             mkey
              (real-fn)))))
 
 (defmethod field-data* "distribution"
@@ -140,18 +156,18 @@
         real-fn (if-not (seq arguments)
                   resolved
                   (apply partial (cons resolved arguments)))]
-    (fn [key this model & more]
+    (fn [mkey this model & more]
       (let [resolved-args (map #(resolve-references % this model) arguments)
             real-fn (if-not (seq resolved-args)
                       resolved
                       (apply partial (cons resolved resolved-args)))]
         (println resolved real-fn)
-        (assoc this key (id/draw (real-fn)))))))
+        (assoc this mkey (id/draw (real-fn)))))))
 
 (defmethod field-data* "formula"
   [value type-norm]
   (let [properties (:properties value)]
-    (fn [key this model & more]
+    (fn [mkey this model & more]
       (let [other (apply hash-map more)
             properties (current-properties properties (:count other))
             insert-x (s/replace (:equation properties) #"x" (-> other :count str))
@@ -171,11 +187,11 @@
       (let [field (-> fdata :value :field)
                           master? (:master fdata)]
                       (if master?
-                        (fn [key this model & more]
+                        (fn [mkey this model & more]
                           (field model))
                         (let [weight (-> fdata :value :select :weight)
                               query-filter (-> fdata :value :select :filter)]
-                          (fn [key this model & more]
+                          (fn [mkey this model & more]
                             "TO DO"))))
       (field-data* (:value fdata) type-norm))))
 
