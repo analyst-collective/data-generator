@@ -68,6 +68,7 @@
   [fdata]
   (let [type-norm (:type-norm fdata)
         val-type (-> fdata :value :type)]
+    (println "VALTYPE" val-type fdata)
     (case val-type
       "autoincrement" (fn [key this model & more]
                         this) ; No need to do anything. The db will generate this field on insert
@@ -141,7 +142,7 @@
                   (fn [key this model & more]
                     (let [other (apply hash-map more)
                           properties (current-properties properties (:count other))
-                          insert-x (s/replace (:equation properties) #"x" (-> other :x str))
+                          insert-x (s/replace (:equation properties) #"x" (-> other :count str))
                           equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
                           equation-split (s/split equation-replaced #"\s+")
                           equation-resolved (map #(resolve-references % this model) equation-split)
@@ -172,12 +173,26 @@
                               (and (empty? (field deps))
                                    [field fdata]))
                             data)]
+    (println "FIELD" field "FDATA" fdata)
     (when field
       {:key field :fn (field-data fdata)})))
 
-(defn remove-field-dep
+(defn remove-field-dep-2
   [deps field]
-  (reduce-kv #(assoc %1 %2 (disj %3 field)) {} deps))
+  (println "DEPS" deps)
+  (reduce-kv #(assoc-in %1 [:field-deps %2] (disj %3 field)) deps deps))
+
+(defn remove-field-dep
+  [deps remove-field]
+  (reduce-kv (fn [m model deps-map]
+               (let [field-deps (:field-deps deps-map)
+                     new-field-deps (reduce-kv (fn [m1 field fdeps]
+                                                 (assoc m1 field (disj fdeps remove-field)))
+                                               field-deps
+                                               field-deps)]
+                 (assoc m :field-deps new-field-deps)))
+             deps
+             deps))
 
 (defn build-model-generator
   ([data deps]
@@ -195,16 +210,16 @@
                                       (:key new-item)))]
        (recur new-data new-deps new-fn-list)))))
 
-(defn run-fns
-  ([fn-coll model]
-   (run-fns fn-coll model {}))
-  ([fn-coll model this]
-   (if (empty? fn-coll)
-     this
-     (let [function (first fn-coll)
-           new-this (function this model)
-           new-fn-coll (rest fn-coll)]
-       (recur new-fn-coll model new-this)))))
+(defn add-generators
+  [config dependencies]
+  (let [models (:models config)
+        new-models (reduce-kv (fn [m table data]
+                                (let [model (:model data)
+                                      fn-list (build-model-generator model dependencies)]
+                                  (assoc m table :fn-list fn-list)))
+                              models
+                              models)]
+    (assoc config :models new-models)))
 
 (defn generators
   [config dependencies]

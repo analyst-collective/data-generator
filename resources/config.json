@@ -116,14 +116,12 @@
         "created_at": {
           "type": "datetime",
           "master": {
-            "min": 1000000000000,
-            "increment": 5184000000,
             "count": 10
           },
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "x",
+              "equation": "1000000000000 + x * 5184000000",
               "randomness": 0.4
             }
           }
