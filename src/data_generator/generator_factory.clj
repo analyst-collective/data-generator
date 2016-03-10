@@ -161,7 +161,6 @@
             real-fn (if-not (seq resolved-args)
                       resolved
                       (apply partial (cons resolved resolved-args)))]
-        (println resolved real-fn)
         (assoc this mkey (id/draw (real-fn)))))))
 
 (defmethod field-data* "formula"
@@ -177,7 +176,6 @@
             primitives (map str->primitive equation-resolved)]
         (apply (functionize $=) primitives)))))
 
-;; TODO make this a mutli-method to make clearer and allow for extensibility
 (defn field-data
   [fdata]
   (let [type-norm (:type-norm fdata)
@@ -185,14 +183,14 @@
         val-type (-> fdata :value :type)]
     (if association?
       (let [field (-> fdata :value :field)
-                          master? (:master fdata)]
-                      (if master?
-                        (fn [mkey this model & more]
-                          (field model))
-                        (let [weight (-> fdata :value :select :weight)
-                              query-filter (-> fdata :value :select :filter)]
-                          (fn [mkey this model & more]
-                            "TO DO"))))
+            master? (:master fdata)]
+        (if master?
+          (fn [mkey this model & more]
+            (field model))
+          (let [weight (-> fdata :value :select :weight)
+                query-filter (-> fdata :value :select :filter)]
+            (fn [mkey this model & more]
+              "TO DO"))))
       (field-data* (:value fdata) type-norm))))
 
 (defn master-column
@@ -205,54 +203,56 @@
       {:key field :fn (field-data fdata)})))
 
 (defn independant-column
-  [data deps]
-  (let [[field fdata] (some (fn [[field fdata]]
-                              (and (empty? (field deps))
-                                   [field fdata]))
-                            data)]
-    (when field
-      {:key field :fn (field-data fdata)})))
+  [data deps table]
+  (let [independent-field (some (fn [[field fdeps]]
+                                  (and (empty? fdeps) field))
+                                (-> deps table :field-deps))]
+    (when independent-field
+      {:key independent-field :fn (field-data (independent-field data))})))
+
 
 (defn remove-field-dep
-  [deps remove-field]
-  (reduce-kv (fn [m model deps-map]
-               (let [field-deps (:field-deps deps-map)
-                     new-field-deps (reduce-kv (fn [m1 field fdeps]
-                                                 (assoc m1 field (disj fdeps remove-field)))
-                                               field-deps
-                                               field-deps)]
-                 (assoc m :field-deps new-field-deps)))
-             deps
-             deps))
+  [deps table remove-field]
+  (let [table-field-deps (-> deps table :field-deps)
+        new-tf-deps (reduce-kv (fn [m field fdeps]
+                                 (assoc m field (disj fdeps remove-field)))
+                               table-field-deps
+                               table-field-deps)
+        remove-remove-field (dissoc new-tf-deps remove-field)]
+    (assoc-in deps [table :field-deps] remove-remove-field)))
 
 (defn build-model-generator
-  ([data deps]
-   (build-model-generator (:model data) deps []))
-  ([mdata deps fn-list]
+  ([table data deps]
+   (build-model-generator table (:model data) deps []))
+  ([table mdata deps fn-list]
    (if (empty? mdata)
      fn-list
-     (let [new-item (or (master-column mdata)
-                        (independant-column mdata deps)
-                        (throw (Exception. (str "Circular dependency!" deps))))
+     (let [
+           ;; _ (println "MDATA" mdata)
+           new-item (or (master-column mdata)
+                        (independant-column mdata deps table)
+                        (do #_(clojure.pprint/pprint deps)
+                            (throw (Exception. (str "Circular dependency!")))))
            new-mdata (dissoc mdata (:key new-item))
-           new-deps (remove-field-dep deps (:key new-item))
+           new-deps (remove-field-dep deps table (:key new-item))
+           ;; _ (clojure.pprint/pprint "ORIG")
+           ;; _ (clojure.pprint/pprint deps)
+           ;; _ (clojure.pprint/pprint {"FIELD" (:key new-item)})
+           ;; _ (clojure.pprint/pprint  "CHANGE")
+           ;; _ (clojure.pprint/pprint  new-deps)
            new-fn-list (conj fn-list
                              (partial (:fn new-item)
                                       (:key new-item)))]
-       (recur new-mdata new-deps new-fn-list)))))
+       (recur table new-mdata new-deps new-fn-list)))))
 
-(defn add-generators
+(defn generators
   [config dependencies]
   (let [models (:models config)
         new-models (reduce-kv (fn [m table data]
-                                (let [model (:model data)
-                                      fn-list (build-model-generator model dependencies)]
-                                  (assoc m table :fn-list fn-list)))
+                                (let [fn-list (build-model-generator table data dependencies)
+                                      new-data (assoc data :fn-list fn-list)]
+                                  (assoc m table new-data)))
                               models
                               models)]
     (assoc config :models new-models)))
 
-(defn generators
-  [config dependencies]
-  (println "Got args")
-  config)

@@ -1,7 +1,10 @@
 {
   "database": {
-    "dbtype": "sqlite",
-    "dbname": "demo_data.db"
+    "user": "samprotas",
+    "dbtype": "postgresql",
+    "dbname": "data_generator",
+    "host": "localhost",
+    "port": 5432
   },
   "models": {
     "salesperson": {

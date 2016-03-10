@@ -1,4 +1,5 @@
-(ns data-generator.dependency-resolution)
+(ns data-generator.dependency-resolution
+  (:require [clojure.core.async :as a :refer [chan mult tap]]))
 
 (defn ref-locate
  "Recursively check values for $self.<field_name> to identify which fields (on this model) this field depends on.
@@ -52,6 +53,40 @@
                                                                                (:model data)))]
     intra-table))
 
+(defn chan-setup
+  [dependencies]
+  (let [sources (->> dependencies
+                     (map second)
+                     (map :table-dep)
+                     (map :source)
+                     (apply clojure.set/union))
+        added-src (reduce-kv (fn [m table deps]
+                               (if (sources table)
+                                 (let [src-chan (chan 100)
+                                       src-mult (mult src-chan)
+                                       new-deps (assoc deps :src-pub src-chan :src-mult src-mult)]
+                                   (assoc m table new-deps))
+                                 m))
+                             dependencies
+                             dependencies)
+        added-done-and-src-sub (reduce-kv (fn [m table deps]
+                                            (let [added-done-chan (assoc deps :done-chan (chan))
+                                                  source (-> deps :table-dep :source first)
+                                                  added-src-chan (if-not source
+                                                                   added-done-chan
+                                                                   (let [src-sub (chan 100)
+                                                                         src-mult (-> m source :src-mult)
+                                                                         tapped (tap src-mult src-sub)
+                                                                         with-source (assoc added-done-chan
+                                                                                            :src-sub
+                                                                                            src-sub)]
+                                                                     with-source))]
+                                              (assoc m table added-src-chan)))
+                                          added-src
+                                          added-src)]
+    added-done-and-src-sub))
+
 (defn resolve
   [config]
-  (reduce-kv table-deps {} (:models config)))
+  (let [dependencies (reduce-kv table-deps {} (:models config))]
+    (chan-setup dependencies)))
