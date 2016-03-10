@@ -2,9 +2,10 @@
   (:require [clojure.java.jdbc :as j]
             [clojure.string :as s]
             [sqlingvo.core :as sql]
-            [sqlingvo.db :refer [postgresql]]))
+            [sqlingvo.db :refer [postgresql sqlite]]))
 
 (def pg (postgresql))
+(def sqlite (sqlite))
 
 (defn add-pk
   [col-spec fdata]
@@ -46,8 +47,10 @@
   [formatted db-spec]
   (j/with-db-connection [conn db-spec]
     (doseq [[table cols] formatted]
-      (let [drop-statement (sql/sql (sql/drop-table pg [table] (sql/if-exists true)))
-            col-fns (concat [pg table] (map #(apply sql/column %) cols))
+      (let [drop-statement (sql/sql (sql/drop-table sqlite [table] (sql/if-exists true)))
+            col-fns (concat [sqlite table] (map #(apply sql/column %) cols))
+            ;; drop-statement (sql/sql (sql/drop-table pg [table] (sql/if-exists true)))
+            ;; col-fns (concat [pg table] (map #(apply sql/column %) cols))
             create-statement (sql/sql (apply sql/create-table col-fns))]
         (println drop-statement)
         (println create-statement)

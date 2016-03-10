@@ -7,6 +7,7 @@
                  [cheshire "5.5.0"]
                  [org.clojure/java.jdbc "0.4.2"]
                  [org.postgresql/postgresql "9.4-1201-jdbc41"]
+                 [org.xerial/sqlite-jdbc "3.8.11.2"]
                  [sqlingvo "0.8.6"]
                  [clj-time "0.11.0"]
                  [faker "0.2.2"]
