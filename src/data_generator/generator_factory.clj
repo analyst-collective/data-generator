@@ -43,10 +43,10 @@
                                              `(/ ((over
                                                    (sum ~weighted-field)
                                                    (order-by ~pk)))
-                                                 ~(sql/select
-                                                      pg
-                                                      ['(sum weighted-field)]
-                                                    (sql/from table)))
+                                                 (cast ~(sql/select
+                                                           pg
+                                                           ['(sum weighted-field)]
+                                                         (sql/from table)) :float))
                                              cumulative)] (sql/from table))]
        (sql/select
            pg
@@ -67,9 +67,9 @@
                                   `(/ ((over
                                         (sum ~weighted-field)
                                         (order-by ~pk)))
-                                      ~(sql/select pg ['(sum weighted-field)]
-                                         (sql/from table)
-                                         (sql/where where-statement)))
+                                      (cast ~(sql/select pg ['(sum weighted-field)]
+                                              (sql/from table)
+                                              (sql/where where-statement)) :float))
                                   cumulative)]
                            (sql/from table)
                            (sql/where where-statement))]
