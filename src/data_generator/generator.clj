@@ -10,13 +10,6 @@
 (defn insert
   [config table model out-chan]
   (let [db-spec (:database config)
-        ;; statement (if out-chan
-        ;;             (sql/insert pg table []
-        ;;                         (sql/values [model])
-        ;;                         (sql/returning :*))
-        ;;             (sql/insert pg table []
-        ;;                         (sql/values [model])))
-        ;; sql-statement (sql/sql statement)
         row (first (j/insert! db-spec table model))]
     (println "ROW" row)
     (when out-chan
@@ -52,3 +45,4 @@
                           (:model data))
         iterations (range (:count master))]
     (generate-model* config fn-list table iterations)))
+

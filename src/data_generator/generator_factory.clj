@@ -1,6 +1,9 @@
 (ns data-generator.generator-factory
   (:require [clj-time.coerce :as c]
             [clojure.string :as s]
+            [clojure.java.jdbc :as j]
+            [sqlingvo.core :as sql]
+            [sqlingvo.db :refer [postgresql sqlite]]
             [incanter.distributions :as id]
             [incanter.core :refer [$=]]
             [faker.address]
@@ -9,6 +12,85 @@
             [faker.lorem]
             [faker.name]
             [faker.phone_number]))
+
+(def pg (postgresql))
+
+(defn add-cumulative-tag
+  [field]
+  (-> field name (str "_cumulative") keyword))
+
+(defn filter->where-criteria
+  [[a op b]]
+  (list op a b))
+
+(defn query-filtered
+  [table filter-list]
+  (sql/sql
+   (sql/select
+       pg
+       [:* (sql/as '(random) :random_col_for_sorting)]
+       (sql/from table)
+                                        ; TODO support OR/AND criteria
+       (sql/where (filter->where-criteria filter-list))
+       (sql/order-by :random_col_for_sorting)
+       (sql/limit 1))))
+
+(defn query-weighted
+  [table weighted-field pk]
+  (let [cumulative (add-cumulative-tag weighted-field)]
+    (sql/sql
+     (sql/with pg [:temp (sql/select pg [:* (sql/as
+                                             `(/ ((over
+                                                   (sum ~weighted-field)
+                                                   (order-by ~pk)))
+                                                 ~(sql/select
+                                                      pg
+                                                      ['(sum weighted-field)]
+                                                    (sql/from table)))
+                                             cumulative)] (sql/from table))]
+       (sql/select
+           pg
+           [:*]
+         (sql/from :temp)
+         (sql/where `(> ~(rand) ~cumulative))
+         (sql/order-by cumulative)
+         (sql/limit 1))))))
+
+(defn query-filtered-weighted
+  [table filter-list weighted-field pk]
+  (let [cumulative (add-cumulative-tag weighted-field)
+        where-statement (filter->where-criteria filter-list)]
+    (sql/sql
+     (sql/with pg [:temp (sql/select
+                             pg
+                             [:* (sql/as
+                                  `(/ ((over
+                                        (sum ~weighted-field)
+                                        (order-by ~pk)))
+                                      ~(sql/select pg ['(sum weighted-field)]
+                                         (sql/from table)
+                                         (sql/where where-statement)))
+                                  cumulative)]
+                           (sql/from table)
+                           (sql/where where-statement))]
+       (sql/select
+           pg
+           [:*]
+         (sql/from :temp)
+         (sql/where `(> ~(rand) ~cumulative))
+         (sql/order-by cumulative)
+         (sql/limit 1))))))
+
+(defn query
+  [table]
+  (sql/sql
+   (sql/select
+       pg
+       [:* (sql/as '(random) :random_col_for_sorting)]
+       (sql/from table)
+       (sql/order-by :random_col_for_sorting)
+       (sql/limit 1))))
+
 
 
 ;; http://stackoverflow.com/questions/9273333/in-clojure-how-to-apply-a-macro-to-a-list
@@ -182,15 +264,41 @@
         association? (-> fdata :type s/lower-case (= "association"))
         val-type (-> fdata :value :type)]
     (if association?
-      (let [field (-> fdata :value :field)
+      (let [field (-> fdata :value :field keyword)
+            model (-> fdata :value :model keyword)
             master? (:master fdata)]
         (if master?
           (fn [mkey this model & more]
             (field model))
-          (let [weight (-> fdata :value :select :weight)
-                query-filter (-> fdata :value :select :filter)]
+          (let [weight (-> fdata :value :weight keyword)
+                filter-criteria (-> fdata :value :filter)
+                filter-prepped (when filter-criteria
+                                 (-> filter-criteria
+                                     (s/split #"\s+")
+                                     (partial map
+                                              #(cond
+                                                 ((complement instance?) java.lang.String %) %
+                                                 (re-find #"^\$model\.(.+)$" %) (->> %
+                                                                                     (re-find
+                                                                                      #"^$model\.(.+)$")
+                                                                                     second
+                                                                                     keyword)
+                                                 :else %))))]
             (fn [mkey this model & more]
-              "TO DO"))))
+              (let [other (apply hash-map more)
+                    database (-> other :config :database)
+                    query-statement (cond
+                            (and weight filter-prepped) (query-filtered-weighted model
+                                                                                 filter-prepped
+                                                                                 weight
+                                                                                 field)
+                            weight (query-weighted model weight field)
+                            filter-prepped (query-filtered model filter-prepped)
+                            :else (query model))
+                    result (first (j/query database query-statement))]
+                (if-not result
+                  :none
+                  (field result)))))))
       (field-data* (:value fdata) type-norm))))
 
 (defn master-column
