@@ -2,6 +2,9 @@
   (:require [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
             [clojure.java.jdbc :as j]
+            [clj-time.coerce :refer [from-long to-sql-date]]
+            [incanter.distributions :as id] ;; functions are resovled in this namespace
+            [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
             [clojure.core.async :as a :refer [<!! <! >!! >! chan]]))
 
 (def pg (postgresql))
@@ -26,14 +29,26 @@
            new-fn-coll (rest fn-coll)]
        (recur new-fn-coll model iteration new-this)))))
 
+(defn coerce-dates
+  [item data]
+  (println "BEFORE" item)
+  (reduce-kv (fn [new-item field fdata]
+               (if (#{:timestamp-with-time-zone} (:type-norm fdata))
+                 (assoc new-item field (-> item field long to-sql-date) #_(-> item field long from-long))
+                 new-item))
+             item
+             (:model data)))
+
 (defn generate-model*
-  [config fn-list table iterations]
+  [config fn-list table data iterations]
   (let [iteration (first iterations)]
     (when iteration
-      ;; (println (run-fns fn-list {} iteration)) ;; Insert into db here
-      (let [item (run-fns fn-list {} iteration)]
-        (insert config table item)
-        (recur config fn-list table (rest iterations))))))
+      (let [item (run-fns fn-list {} iteration)
+            skip? (->> item vals (some #{:none}))] ;; Select association returned nothing
+        (when-not skip?
+          (insert config table (coerce-dates item data) false)
+          (println "AFTER" (coerce-dates item data)))
+        (recur config fn-list table data (rest iterations))))))
 
 (defn generate-model
   [config fn-list table data]
@@ -44,5 +59,16 @@
                           {}
                           (:model data))
         iterations (range (:count master))]
-    (generate-model* config fn-list table iterations)))
+    (generate-model* config fn-list table data iterations)))
 
+
+(defn generate
+  [config dependencies]
+  (clojure.pprint/pprint config)
+  (clojure.pprint/pprint dependencies)
+  config)
+
+
+(defn test-salesperson
+  [config model-name]
+  (generate-model config (-> config :models model-name :fn-list) model-name (-> config :models model-name)))

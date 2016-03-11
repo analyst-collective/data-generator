@@ -141,9 +141,25 @@
 
 (defn str->primitive
   [string]
-  (if-let [number (re-find #"^\d+(?:\.\d+)?$" string)]
-    (Double/parseDouble number)
-    (symbol string)))
+  (if ((complement instance?) java.lang.String string)
+    string ;; not really a string
+    (if-let [number (re-find #"^\d+(?:\.\d+)?$" string)]
+      (Double/parseDouble number)
+      (symbol string))))
+
+(defn calculate-formula
+  [equation this model more]
+  (if-not (instance? java.lang.String equation)
+    equation ; nothing to calculate
+    (let [other (apply hash-map more)
+          ;; properties (current-properties properties (:count other))
+          insert-x (s/replace equation #"x" (-> other :count str))
+          equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
+          equation-split (s/split equation-replaced #"\s+")
+          equation-resolved (map #(resolve-references % this model) equation-split)
+          primitives (map str->primitive equation-resolved)
+          calculated (apply (functionize $=) primitives)]
+      calculated)))
 
 (defmulti field-data* (fn [value _]
                         (:type value)))
@@ -155,12 +171,15 @@
                               {}
                               (:branches value))]
     (fn [mkey this model & more]
-      (let [equation-replaced (s/replace (:check value) #"\s\^\s" " ** ")
-            equation-split (s/split equation-replaced #"\s+")
-            equation-resolved (map #(resolve-references % this model) equation-split)
-            primitives (map str->primitive equation-resolved)
-            evaluated (apply (functionize $=) primitives)
-            chosen-fn ((keyword evaluated) result-fns)
+      (let [
+            ;; equation-replaced (s/replace (:check value) #"\s\^\s" " ** ")
+            ;; equation-split (s/split equation-replaced #"\s+")
+            ;; equation-resolved (map #(resolve-references % this model) equation-split)
+            ;; _ (println equation-resolved)
+            ;; primitives (map str->primitive equation-resolved)
+            ;; evaluated (apply (functionize $=) primitives)
+            evaluated (calculate-formula (:check value) this model more)
+            chosen-fn ((-> evaluated str keyword) result-fns)
             args (list* mkey this model more)]
         (apply chosen-fn args)))))
 
@@ -232,17 +251,23 @@
 
 (defmethod field-data* "distribution"
   [value type-norm]
+  (println "VALUE" value)
   (let [dist (-> value :properties :type)
+        _ (println "DIST" dist)
+        _ (println "SYMBOL" (symbol "id" dist))
         arguments (or (-> value :properties :args) [])
-        resolved (resolve (symbol "id" dist))
-        real-fn (if-not (seq arguments)
-                  resolved
-                  (apply partial (cons resolved arguments)))]
+        resolved (resolve (symbol "id" dist))]
+    (println "RESOLVED" resolved)
     (fn [mkey this model & more]
-      (let [resolved-args (map #(resolve-references % this model) arguments)
-            real-fn (if-not (seq resolved-args)
+      (println "THIS" this)
+      (let [resolved-args (map #(calculate-formula % this model more) ;#(resolve-references % this model)
+                               arguments)
+            _ (println "RESOLVED ARGS" resolved-args)
+            real-fn (if (empty? resolved-args)
                       resolved
                       (apply partial (cons resolved resolved-args)))]
+        (println "REALFN" real-fn)
+        (println "REALFN TEST RUN" (real-fn))
         (assoc this mkey (id/draw (real-fn)))))))
 
 (defmethod field-data* "formula"
@@ -255,8 +280,9 @@
             equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
             equation-split (s/split equation-replaced #"\s+")
             equation-resolved (map #(resolve-references % this model) equation-split)
-            primitives (map str->primitive equation-resolved)]
-        (apply (functionize $=) primitives)))))
+            primitives (map str->primitive equation-resolved)
+            calculated (apply (functionize $=) primitives)]
+        (assoc this mkey calculated)))))
 
 (defn field-data
   [fdata]
@@ -269,7 +295,7 @@
             master? (:master fdata)]
         (if master?
           (fn [mkey this model & more]
-            (field model))
+            (assoc this mkey (field model)))
           (let [weight (-> fdata :value :weight keyword)
                 filter-criteria (-> fdata :value :filter)
                 filter-prepped (when filter-criteria
@@ -297,8 +323,8 @@
                             :else (query model))
                     result (first (j/query database query-statement))]
                 (if-not result
-                  :none
-                  (field result)))))))
+                  (assoc this mkey :none)
+                  (assoc this mkey (field result))))))))
       (field-data* (:value fdata) type-norm))))
 
 (defn master-column
@@ -335,19 +361,11 @@
   ([table mdata deps fn-list]
    (if (empty? mdata)
      fn-list
-     (let [
-           ;; _ (println "MDATA" mdata)
-           new-item (or (master-column mdata)
+     (let [new-item (or (master-column mdata)
                         (independant-column mdata deps table)
-                        (do #_(clojure.pprint/pprint deps)
-                            (throw (Exception. (str "Circular dependency!")))))
+                        (throw (Exception. (str "Circular dependency!"))))
            new-mdata (dissoc mdata (:key new-item))
            new-deps (remove-field-dep deps table (:key new-item))
-           ;; _ (clojure.pprint/pprint "ORIG")
-           ;; _ (clojure.pprint/pprint deps)
-           ;; _ (clojure.pprint/pprint {"FIELD" (:key new-item)})
-           ;; _ (clojure.pprint/pprint  "CHANGE")
-           ;; _ (clojure.pprint/pprint  new-deps)
            new-fn-list (conj fn-list
                              (partial (:fn new-item)
                                       (:key new-item)))]
@@ -363,4 +381,5 @@
                               models
                               models)]
     (assoc config :models new-models)))
+
 

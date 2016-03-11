@@ -5,15 +5,16 @@
             [clojure.string :as s]
             [data-generator.config :as conf]
             [data-generator.dependency-resolution :as dep]
-            [data-generator.generator-factory :as build])
+            [data-generator.generator-factory :as build]
+            [data-generator.generator :as generator])
   (:gen-class))
 
 (defn generate-data
   [config]
-  (let [dependencies (dep/resolve config)]
-    (clojure.pprint/pprint dependencies)
-    (schema/create-tables config)
-    (build/generators config dependencies)))
+  (let [dependencies (dep/resolve config)
+        _ (schema/create-tables config)
+        with-generators (build/generators config dependencies)]
+    (generator/generate with-generators dependencies)))
 
 (defn -main
   "I don't do a whole lot ... yet."

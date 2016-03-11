@@ -43,7 +43,7 @@
           "value": {
             "type": "formula",
             "properties": [{
-              "equation": "2 + 3 * x",
+              "equation": "1000000000 + 100000000 * x",
               "randomness": 0.3
             }, {
               "start": 5,
@@ -60,8 +60,8 @@
               "true": {
                 "type": "distribution",
                 "properties": {
-                  "mean": "$self.created_at + 30000",
-                  "std": 15000,
+                  "type": "normal-distribution",
+                  "args": ["$self.created_at + 30000", 15000],
                   "constraint": {
                     "min": "$self.created_at + 100000",
                     "offset": 100000
