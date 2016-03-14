@@ -86,7 +86,7 @@
                                           added-src)]
     added-done-and-src-sub))
 
-(defn resolve
+(defn resolve-deps
   [config]
   (let [dependencies (reduce-kv table-deps {} (:models config))]
     (chan-setup dependencies)))

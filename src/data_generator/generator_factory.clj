@@ -21,6 +21,7 @@
 
 (defn filter->where-criteria
   [[a op b]]
+  ;; (println "RECIEVED" a op b)
   (list op a b))
 
 (defn query-filtered
@@ -45,21 +46,25 @@
                                                    (order-by ~pk)))
                                                  (cast ~(sql/select
                                                            pg
-                                                           ['(sum weighted-field)]
+                                                           [`(sum ~weighted-field)]
                                                          (sql/from table)) :float))
                                              cumulative)] (sql/from table))]
        (sql/select
            pg
            [:*]
          (sql/from :temp)
-         (sql/where `(> ~(rand) ~cumulative))
+         (sql/where `(> ~cumulative ~(rand)))
          (sql/order-by cumulative)
          (sql/limit 1))))))
 
 (defn query-filtered-weighted
   [table filter-list weighted-field pk]
   (let [cumulative (add-cumulative-tag weighted-field)
+        ;; _ (println "FILTER LIST" filter-list)
         where-statement (filter->where-criteria filter-list)]
+    ;; (println "FINAL WHERE STATEMENT" where-statement)
+    ;; (println "FIRST TYPE" (class (first where-statement)))
+    ;; (println "TABLE" table)
     (sql/sql
      (sql/with pg [:temp (sql/select
                              pg
@@ -67,7 +72,7 @@
                                   `(/ ((over
                                         (sum ~weighted-field)
                                         (order-by ~pk)))
-                                      (cast ~(sql/select pg ['(sum weighted-field)]
+                                      (cast ~(sql/select pg [`(sum ~weighted-field)]
                                               (sql/from table)
                                               (sql/where where-statement)) :float))
                                   cumulative)]
@@ -77,7 +82,7 @@
            pg
            [:*]
          (sql/from :temp)
-         (sql/where `(> ~(rand) ~cumulative))
+         (sql/where `(> ~cumulative ~(rand)))
          (sql/order-by cumulative)
          (sql/limit 1))))))
 
@@ -100,6 +105,14 @@
 (defmacro functionize
   [macro]
   `(fn [& args#] (eval (cons '~macro args#))))
+
+(defn randomize-value
+  "Apply random offset (randomness) to given value"
+  [value randomness]
+  (if-not randomness
+    value
+    (let [multiplier ((rand-nth [+ -]) 1 (rand randomness))]
+      (* value multiplier))))
 
 (defn coerce
   "Coerce keyword into field type.
@@ -171,14 +184,7 @@
                               {}
                               (:branches value))]
     (fn [mkey this model & more]
-      (let [
-            ;; equation-replaced (s/replace (:check value) #"\s\^\s" " ** ")
-            ;; equation-split (s/split equation-replaced #"\s+")
-            ;; equation-resolved (map #(resolve-references % this model) equation-split)
-            ;; _ (println equation-resolved)
-            ;; primitives (map str->primitive equation-resolved)
-            ;; evaluated (apply (functionize $=) primitives)
-            evaluated (calculate-formula (:check value) this model more)
+      (let [evaluated (calculate-formula (:check value) this model more)
             chosen-fn ((-> evaluated str keyword) result-fns)
             args (list* mkey this model more)]
         (apply chosen-fn args)))))
@@ -251,47 +257,58 @@
 
 (defmethod field-data* "distribution"
   [value type-norm]
-  (println "VALUE" value)
+  ;; (println "VALUE" value)
   (let [dist (-> value :properties :type)
-        _ (println "DIST" dist)
-        _ (println "SYMBOL" (symbol "id" dist))
+        ;; _ (println "DIST" dist)
+        ;; _ (println "SYMBOL" (symbol "id" dist))
         arguments (or (-> value :properties :args) [])
         resolved (resolve (symbol "id" dist))]
-    (println "RESOLVED" resolved)
+    ;; (println "RESOLVED" resolved)
     (fn [mkey this model & more]
-      (println "THIS" this)
+      ;; (println "THIS" this)
       (let [resolved-args (map #(calculate-formula % this model more) ;#(resolve-references % this model)
                                arguments)
-            _ (println "RESOLVED ARGS" resolved-args)
+            ;; _ (println "RESOLVED ARGS" resolved-args)
             real-fn (if (empty? resolved-args)
                       resolved
                       (apply partial (cons resolved resolved-args)))]
-        (println "REALFN" real-fn)
-        (println "REALFN TEST RUN" (real-fn))
+        ;; (println "REALFN" real-fn)
+        ;; (println "REALFN TEST RUN" (real-fn))
         (assoc this mkey (id/draw (real-fn)))))))
 
 (defmethod field-data* "formula"
   [value type-norm]
   (let [properties (:properties value)]
     (fn [mkey this model & more]
-      (let [other (apply hash-map more)
+      (let [
+            other (apply hash-map more)
             properties (current-properties properties (:count other))
-            insert-x (s/replace (:equation properties) #"x" (-> other :count str))
-            equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
-            equation-split (s/split equation-replaced #"\s+")
-            equation-resolved (map #(resolve-references % this model) equation-split)
-            primitives (map str->primitive equation-resolved)
-            calculated (apply (functionize $=) primitives)]
-        (assoc this mkey calculated)))))
+            ;; insert-x (s/replace (:equation properties) #"x" (-> other :count str))
+            ;; equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
+            ;; equation-split (s/split equation-replaced #"\s+")
+            ;; equation-resolved (map #(resolve-references % this model) equation-split)
+            ;; primitives (map str->primitive equation-resolved)
+            ;; calculated (apply (functionize $=) primitives)
+            calculated (calculate-formula (:equation properties) this model more)
+            randomness (resolve-references (:randomness properties) this model)
+            randomized (randomize-value calculated randomness)
+            ]
+        (assoc this mkey randomized)))))
+
+(defn normalize-filter
+  [type-norm value]
+  (cond
+    (#{:timestamp-with-time-zone} type-norm) (-> value long c/to-sql-time)
+    :else value))
 
 (defn field-data
-  [fdata]
+  [config fdata]
   (let [type-norm (:type-norm fdata)
         association? (-> fdata :type s/lower-case (= "association"))
         val-type (-> fdata :value :type)]
     (if association?
       (let [field (-> fdata :value :field keyword)
-            model (-> fdata :value :model keyword)
+            table (-> fdata :value :model keyword)
             master? (:master fdata)]
         (if master?
           (fn [mkey this model & more]
@@ -299,28 +316,45 @@
           (let [weight (-> fdata :value :weight keyword)
                 filter-criteria (-> fdata :value :filter)
                 filter-prepped (when filter-criteria
-                                 (-> filter-criteria
-                                     (s/split #"\s+")
-                                     (partial map
-                                              #(cond
-                                                 ((complement instance?) java.lang.String %) %
-                                                 (re-find #"^\$model\.(.+)$" %) (->> %
-                                                                                     (re-find
-                                                                                      #"^$model\.(.+)$")
-                                                                                     second
-                                                                                     keyword)
-                                                 :else %))))]
+                                 (->> filter-criteria
+                                      (#(s/split %  #"\s+"))
+                                      (map
+                                       #(cond
+                                          ((complement instance?) java.lang.String %) %
+                                          (re-find #"^\$model\.(.+)$" %) (->> %
+                                                                              (re-find
+                                                                               #"^\$model\.(.+)$")
+                                                                              second
+                                                                              keyword)
+                                          :else %))))
+                filter-field (when filter-prepped
+                              (some #(and (keyword? %) %) filter-prepped))
+                ;; _ (println "FILTER FIELD" filter-field)
+                filter-type (when filter-field
+                              (-> config :models table :model filter-field :type-norm))]
+            ;; (println "PREPPED" filter-prepped)
             (fn [mkey this model & more]
               (let [other (apply hash-map more)
                     database (-> other :config :database)
+                    ;; _ (println "PREPPED2" filter-criteria)
+                    resolved-where (map #(resolve-references % this model) filter-prepped)
+                    primitives-where (map str->primitive resolved-where)
+                    ;; _ (println "RESOLVED WHERE" resolved-where)
+                    ;; _ (println "RESOLVED TYPE" (class (second resolved-where)))
+                    resolved-value (some #(and (number? %) %) primitives-where)
+                    normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
+                                              primitives-where)
                     query-statement (cond
-                            (and weight filter-prepped) (query-filtered-weighted model
-                                                                                 filter-prepped
+                            (and weight filter-prepped) (query-filtered-weighted table
+                                                                                 ;; filter-prepped
+                                                                                 ;; primitives-where
+                                                                                 normalized-where
                                                                                  weight
                                                                                  field)
-                            weight (query-weighted model weight field)
-                            filter-prepped (query-filtered model filter-prepped)
-                            :else (query model))
+                            weight (query-weighted table weight field)
+                            filter-prepped (query-filtered table filter-prepped)
+                            :else (query table))
+                    ;; _ (println "STATEMENT" query-statement)
                     result (first (j/query database query-statement))]
                 (if-not result
                   (assoc this mkey :none)
@@ -328,21 +362,21 @@
       (field-data* (:value fdata) type-norm))))
 
 (defn master-column
-  [data]
+  [config data]
   (let [[field fdata] (some (fn [[field fdata]]
                               (and (:master fdata)
                                    [field fdata]))
                             data)]
     (when field
-      {:key field :fn (field-data fdata)})))
+      {:key field :fn (field-data config fdata)})))
 
 (defn independant-column
-  [data deps table]
+  [config data deps table]
   (let [independent-field (some (fn [[field fdeps]]
                                   (and (empty? fdeps) field))
                                 (-> deps table :field-deps))]
     (when independent-field
-      {:key independent-field :fn (field-data (independent-field data))})))
+      {:key independent-field :fn (field-data config (independent-field data))})))
 
 
 (defn remove-field-dep
@@ -356,26 +390,26 @@
     (assoc-in deps [table :field-deps] remove-remove-field)))
 
 (defn build-model-generator
-  ([table data deps]
-   (build-model-generator table (:model data) deps []))
-  ([table mdata deps fn-list]
+  ([config table data deps]
+   (build-model-generator config table (:model data) deps []))
+  ([config table mdata deps fn-list]
    (if (empty? mdata)
      fn-list
-     (let [new-item (or (master-column mdata)
-                        (independant-column mdata deps table)
+     (let [new-item (or (master-column config mdata)
+                        (independant-column config mdata deps table)
                         (throw (Exception. (str "Circular dependency!"))))
            new-mdata (dissoc mdata (:key new-item))
            new-deps (remove-field-dep deps table (:key new-item))
            new-fn-list (conj fn-list
                              (partial (:fn new-item)
                                       (:key new-item)))]
-       (recur table new-mdata new-deps new-fn-list)))))
+       (recur config table new-mdata new-deps new-fn-list)))))
 
 (defn generators
   [config dependencies]
   (let [models (:models config)
         new-models (reduce-kv (fn [m table data]
-                                (let [fn-list (build-model-generator table data dependencies)
+                                (let [fn-list (build-model-generator config table data dependencies)
                                       new-data (assoc data :fn-list fn-list)]
                                   (assoc m table new-data)))
                               models

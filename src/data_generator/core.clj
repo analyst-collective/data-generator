@@ -3,6 +3,8 @@
             [cheshire.core :as json]
             [data-generator.schema :as schema]
             [clojure.string :as s]
+            [incanter.distributions :as id] ;; functions are resovled in this namespace
+            [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
             [data-generator.config :as conf]
             [data-generator.dependency-resolution :as dep]
             [data-generator.generator-factory :as build]
@@ -11,7 +13,7 @@
 
 (defn generate-data
   [config]
-  (let [dependencies (dep/resolve config)
+  (let [dependencies (dep/resolve-deps config)
         _ (schema/create-tables config)
         with-generators (build/generators config dependencies)]
     (generator/generate with-generators dependencies)))

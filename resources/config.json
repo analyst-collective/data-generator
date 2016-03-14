@@ -36,18 +36,16 @@
         "created_at": {
           "type": "datetime",
           "master": {
-            "min": 1000000000000,
-            "increment": 5184000000,
             "count": 10
           },
           "value": {
             "type": "formula",
             "properties": [{
-              "equation": "1000000000 + 100000000 * x",
-              "randomness": 0.3
+              "equation": "1000000000000 + 5184000000 * x",
+              "randomness": 0.003
             }, {
               "start": 5,
-              "randomness": 0.6
+              "randomness": 0.006
             }]
           }
         },
@@ -61,7 +59,7 @@
                 "type": "distribution",
                 "properties": {
                   "type": "normal-distribution",
-                  "args": ["$self.created_at + 30000", 15000],
+                  "args": ["$self.created_at + 5184000000", 1700000000],
                   "constraint": {
                     "min": "$self.created_at + 100000",
                     "offset": 100000
@@ -83,7 +81,7 @@
           "value": {
             "type": "range",
             "properties": {
-              "min": 0,
+              "min": 1,
               "max": 10
             }
           }
@@ -122,7 +120,7 @@
             "type": "formula",
             "properties": {
               "equation": "1000000000000 + x * 5184000000",
-              "randomness": 0.4
+              "randomness": 0.004
             }
           }
         }
