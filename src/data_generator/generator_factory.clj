@@ -189,6 +189,23 @@
             args (list* mkey this model more)]
         (apply chosen-fn args)))))
 
+(defn uuid []
+  (str (java.util.UUID/randomUUID)))
+
+(defmethod field-data* "uuid"
+  [value type-norm]
+  (fn [mkey this model & more]
+    (let [generated (uuid)]
+      (assoc this mkey generated))))
+
+(defmethod field-data* "concat"
+  [value type-norm]
+  (fn [mkey this model & more]
+    (let [values (-> value :properties :values)
+          resolved-values (map #(resolve-references % this model) values)
+          joined (s/join "" resolved-values)]
+      (assoc this mkey joined))))
+
 (defmethod field-data* "autoincrement"
   [value type-norm]
   (fn [mkey this model & more]
@@ -405,12 +422,36 @@
                                       (:key new-item)))]
        (recur config table new-mdata new-deps new-fn-list)))))
 
+(defn association-data
+  "Adds quantifier function and likelyhood funciton"
+  [data]
+  (reduce-kv (fn [agg field fdata]
+               (let [field-type (:type fdata)
+                     master-association? (and (= "association" field-type)
+                                             (:master fdata))]
+                 (if-not master-association?
+                   agg
+                   (let [quantity (-> fdata :master :quantity)
+                         quantity-fn (if quantity
+                                       (field-data* quantity :integer)
+                                       (fn [mkey this model & more]
+                                         (assoc this mkey 1)))
+                         probability (or (-> fdata :master :probability)
+                                         1)
+                         probability-fn (fn [mkey this model & more]
+                                          (assoc this mkey (< (rand) probability)))
+                         with-fns (assoc agg :quantity-fn quantity-fn :probability-fn probability-fn)]
+                     with-fns))))
+             data
+             (:model data)))
+
 (defn generators
   [config dependencies]
   (let [models (:models config)
         new-models (reduce-kv (fn [m table data]
                                 (let [fn-list (build-model-generator config table data dependencies)
-                                      new-data (assoc data :fn-list fn-list)]
+                                      added-association-data (association-data data)
+                                      new-data (assoc added-association-data :fn-list fn-list)]
                                   (assoc m table new-data)))
                               models
                               models)]

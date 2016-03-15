@@ -64,7 +64,8 @@
                                       new-model (reduce-kv (fn check-fields [m1 field fdata]
                                                    (if-not (= "association" (:type fdata))
                                                      (assoc m1 field fdata)
-                                                     (let [associated (-> fdata :value :model keyword)
+                                                     (let [data-map (or (:master fdata) (:value fdata))
+                                                           associated (-> data-map :model keyword)
                                                            ;; _ (println associated fdata)
                                                            mdata (-> models associated :model)
                                                            ;; _ (println mdata)

@@ -15,9 +15,10 @@
                                      (if-not (seq fields)
                                        agg
                                        (clojure.set/union agg fields)))
-    (instance? clojure.lang.IPersistentMap v) (reduce-kv ref-locate
-                                                         agg
-                                                         v)
+    (or (instance? clojure.lang.IPersistentMap v)
+        (instance? clojure.lang.IPersistentVector v)) (reduce-kv ref-locate
+                                                            agg
+                                                            v)
     :default agg))
 
 (defn intra-deps

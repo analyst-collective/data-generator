@@ -15,13 +15,15 @@
   [config]
   (let [dependencies (dep/resolve-deps config)
         _ (schema/create-tables config)
+        _ (println "DEPENDENCIES" dependencies)
         with-generators (build/generators config dependencies)]
-    (generator/generate with-generators dependencies)))
+    (generator/generate with-generators dependencies)
+    (schema/drop-virtual-columns with-generators)))
 
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (let [config (-> "config.json"
+  (let [config (-> "stripe.json"
                    conf/load-json
                    conf/association-field-transfer
                    conf/normalize-models)]

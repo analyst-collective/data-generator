@@ -1,0 +1,194 @@
+{
+  "database": {
+    "user": "samprotas",
+    "dbtype": "postgresql",
+    "dbname": "data_generator",
+    "host": "localhost",
+    "port": 5432
+  },
+  "models": {
+    "customer": {
+      "model": {
+        "id_virtual": {
+          "type": "string",
+          "virtual": true,
+          "value": {
+            "type": "uuid"
+          },
+          "master": {
+            "count": 1000
+          }
+        },
+        "id": {
+          // "primarykey": true,
+          "type": "string",
+          "value": {
+            "type": "concat",
+            "properties": {
+              "values": ["cus_", "$self.id_virtual"]
+            }
+          }
+        }
+      }
+    },
+    "invoices": {
+      "model": {
+        "id_virtual": {
+          "type": "string",
+          "virtual": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "id": {
+          "primarykey": true,
+          "type": "string",
+          "value": {
+            "type": "concat",
+            "properties": {
+              "values": ["in_", "$self.id_virtual"]
+            }
+          }
+        },
+        "date": {
+          "type": "integer",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 1408045611,
+              "max": 1458045611
+            }
+          }
+        },
+        "total": {
+          "type": "integer",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 50,
+              "max": 4000
+            }
+          }
+        },
+        "period_start": {
+          "type": "integer",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$self.date"
+            }
+          }
+        },
+        "period_end": {
+          "type": "integer",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$self.date"
+            }
+          }
+        },
+        "subscription": {
+          "type": "association",
+          "master": {
+            "model": "subscriptions",
+            "quantity": {
+              "type": "range",
+              "properties": {
+                "min": 0,
+                "max": 10
+              }
+            }
+          }
+        },
+        "customer": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$model.customer": 1
+            }
+          }
+        },
+        "paid": {
+          "type": "boolean",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "true": 9,
+              "false": 1
+            }
+          }
+        },
+        "forgiven": {
+          "type": "boolean",
+          "value": {
+            "type": "case",
+            "check": "$self.paid",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "false": 1
+                }
+              },
+              "false": {
+                "type": "enum",
+                "weights": {
+                  "false": 2,
+                  "true": 8
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "subscriptions": {
+      "model": {
+        "id_virtual": {
+          "type": "string",
+          "virtual": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "id": {
+          "primarykey": true,
+          "type": "string",
+          "value": {
+            "type": "concat",
+            "properties": {
+              "values": ["sub_", "$self.id_virtual"]
+            }
+          }
+        },
+        "plan__interval": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "month": 5,
+              "year": 5
+            }
+          }
+        },
+        "customer": {
+          "type": "association",
+          "master": {
+            "model": "customer",
+            "quantity": {
+              "type": "enum",
+              "weights": {
+                "1": 6,
+                "2": 3,
+                "3": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

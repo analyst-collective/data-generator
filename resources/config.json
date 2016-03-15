@@ -1,4 +1,4 @@
-{
+ {
   "database": {
     "user": "samprotas",
     "dbtype": "postgresql",
@@ -36,12 +36,12 @@
         "created_at": {
           "type": "datetime",
           "master": {
-            "count": 10
+            "count": 20
           },
           "value": {
             "type": "formula",
             "properties": [{
-              "equation": "1000000000000 + 5184000000 * x",
+              "equation": "1000000000000 + x * 5184000000 / 2",
               "randomness": 0.003
             }, {
               "start": 5,
@@ -114,12 +114,12 @@
         "created_at": {
           "type": "datetime",
           "master": {
-            "count": 10
+            "count": 1000
           },
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "1000000000000 + x * 5184000000",
+              "equation": "1420070400000 + x * 37924824",
               "randomness": 0.004
             }
           }
@@ -132,7 +132,7 @@
           "primarykey": true,
           "type": "integer",
           "master": {
-            "count": 20
+            "count": 30
           },
           "value": {
             "type": "autoincrement"

@@ -64,3 +64,27 @@
         create-format
         (run-commands db-spec))))
 
+(defn drop-col-statement
+  [table column]
+  (str "ALTER TABLE \"" (name table) "\" DROP COLUMN \"" (name column) "\""))
+
+(defn drop-virtual-columns
+  [config]
+  (let [models (:models config)
+        db-spec (:database config)
+        all-statements (reduce-kv (fn [all-statements table data]
+                                (let [model (:model data)
+                                      _ (println "about to filter" model)
+                                      statements (->> model
+                                                      (filter (fn [[field fdata]]
+                                                                (:virtual fdata)))
+                                                      (map first)
+                                                      (map (partial drop-col-statement table))
+                                                      (map #(conj [] %)))]
+                                  (concat all-statements statements)))
+                              []
+                              models)]
+    (j/with-db-connection [conn db-spec]
+      (doseq [statement all-statements]
+        (println statement)
+        (j/execute! conn statement)))))
