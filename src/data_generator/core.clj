@@ -13,21 +13,24 @@
 
 (defn generate-data
   [config]
-  (let [dependencies (dep/resolve-deps config)
-        _ (schema/create-tables config)
-        _ (println "DEPENDENCIES" dependencies)
-        with-generators (build/generators config dependencies)]
-    (generator/generate with-generators dependencies)
-    (schema/drop-virtual-columns with-generators)))
+  (println "here")
+  (let [config-prepped (-> config
+                           conf/association-field-transfer
+                           conf/normalize-models)
+        dependencies (dep/resolve-deps config-prepped)
+        _ (schema/create-tables config-prepped)
+        _ (println "DEPENDENCIES" dependencies)]
+    (println "Got here")
+    (-> config-prepped
+        (build/generators dependencies)
+        (generator/generate dependencies)
+        schema/drop-virtual-columns)))
 
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
   (let [file-name (or (-> args first) "config.json")
-        config-map (conf/load-json file-name)]
-    (if-not config-map
+        config (conf/load-json file-name)]
+    (if-not config
       (println file-name "not found. Exiting without running. Please supply a valid path to a config file.")
-      (-> config-map
-          conf/association-field-transfer
-          conf/normalize-models
-          generate-data))))
+      (generate-data config))))

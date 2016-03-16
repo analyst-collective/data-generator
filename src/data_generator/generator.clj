@@ -147,9 +147,6 @@
                                 (thread (generate-model config dependencies table)))
                               (:models config))
         all-done-ch (a/merge model-done-chans)]
-    (signal-all-done all-done-ch))
-  ;; (clojure.pprint/pprint config)
-  ;; (clojure.pprint/pprint dependencies)
-  ;; [config dependencies]
-  )
+    (signal-all-done all-done-ch)
+    config))
 

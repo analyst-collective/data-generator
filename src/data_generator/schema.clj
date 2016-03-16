@@ -60,7 +60,6 @@
   (let [models (just-models config)
         db-spec (:database config)]
     (-> models
-        ;; filter-virtual  ; After data generation, drop virtual columns!
         create-format
         (run-commands db-spec))))
 

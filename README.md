@@ -1,36 +1,29 @@
 # data-generator
 
-FIXME: description
+This is a tool for generating demonstration datasets that conform to a specified shape or pattern.
+
+Want to demonstrate data analysis (graphing, ML, etc.) but don't have data that you can share? This tool is for you.
+
+This tool can be used as a standalone JAR or as a library in any JVM language.
 
 ## Installation
 
-Download from http://example.com/FIXME.
+1) Clone this repo
+
+2) Ensure you have Leinigan (and any of it's dependencies) installed. See here https://github.com/technomancy/leiningen
+
+3) For standalone access run `lein uberjar` to build. The jar will be located in `/target/uberjar/` and have a suffix of `-standalone.jar`
 
 ## Usage
 
-FIXME: explanation
+# Standalone
 
-    $ java -jar data-generator-0.1.0-standalone.jar [args]
+    $ java -jar data-generator-X.X.X-standalone.jar <filename of config here>
 
-## Options
+# Programmatic
 
-FIXME: listing of options this app accepts.
+    ```clojure
+    (data-generator.core/generate-data "insert config MAP here")
+    ```
 
-## Examples
 
-...
-
-### Bugs
-
-...
-
-### Any Other Sections
-### That You Think
-### Might be Useful
-
-## License
-
-Copyright © 2016 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
