@@ -27,3 +27,6 @@ Note: Currently only supports json files
 `(data-generator.core/generate-data <insert config MAP here>)`
 
 
+## Config File
+
+Example config files can be found in the `/resources/` directory. Make note to update _at least_ the database specs before running.
