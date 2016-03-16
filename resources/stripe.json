@@ -20,7 +20,7 @@
           }
         },
         "id": {
-          // "primarykey": true,
+          "primarykey": true,
           "type": "string",
           "value": {
             "type": "concat",
