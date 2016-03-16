@@ -23,8 +23,11 @@
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (let [config (-> "stripe.json"
-                   conf/load-json
-                   conf/association-field-transfer
-                   conf/normalize-models)]
-    (generate-data config)))
+  (let [file-name (or (-> args first) "config.json")
+        config-map (conf/load-json file-name)]
+    (if-not config-map
+      (println file-name "not found. Exiting without running. Please supply a valid path to a config file.")
+      (-> config-map
+          conf/association-field-transfer
+          conf/normalize-models
+          generate-data))))

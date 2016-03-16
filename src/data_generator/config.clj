@@ -7,7 +7,14 @@
 
 (defn load-json
   [filename]
-  (-> filename io/resource slurp (json/parse-string true)))
+  (let [external-file (io/as-file filename)
+        resource (io/resource filename)]
+    (cond
+      (.exists external-file) (do (println filename "found externally, loading now.")
+                                  (-> external-file slurp (json/parse-string true)))
+      resource (do (println filename "found packaged internally, loading now.")
+                   (-> resource slurp (json/parse-string true)))
+      :default nil)))
 
 ;; TODO other file format loading (yaml, edn, etc.)
 
