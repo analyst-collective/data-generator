@@ -166,8 +166,9 @@
     equation ; nothing to calculate
     (let [other (apply hash-map more)
           ;; properties (current-properties properties (:count other))
-          insert-x (s/replace equation #"x" (-> other :count str))
-          equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
+          insert-x (s/replace equation #"(^| )(x)($| )" (str "$1" (:iteration other) "$3"))
+          insert-y (s/replace equation #"(^| )(y)($| )" (str "$1" (:sequence other) "$3"))
+          equation-replaced (s/replace insert-y #"\s\^\s" " ** ")
           equation-split (s/split equation-replaced #"\s+")
           equation-resolved (map #(resolve-references % this model) equation-split)
           primitives (map str->primitive equation-resolved)
@@ -289,8 +290,6 @@
             real-fn (if (empty? resolved-args)
                       resolved
                       (apply partial (cons resolved resolved-args)))]
-        ;; (println "REALFN" real-fn)
-        ;; (println "REALFN TEST RUN" (real-fn))
         (assoc this mkey (id/draw (real-fn)))))))
 
 (defmethod field-data* "formula"
