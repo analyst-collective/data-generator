@@ -20,10 +20,10 @@ This tool can be used as a standalone JAR or as a library in any JVM language.
 
     $ java -jar data-generator-X.X.X-standalone.jar <filename of config here>
 
+Note: Currently only supports json files
+
 # Programmatic
 
-    ```clojure
-    (data-generator.core/generate-data "insert config MAP here")
-    ```
+`(data-generator.core/generate-data <insert config MAP here>)`
 
 
