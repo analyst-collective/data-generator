@@ -37,15 +37,19 @@
       (>!! out-chan {:src-item row :iteration iteration}))))
 
 (defn run-fns
-  ([config fn-coll model iteration]
-   (run-fns config fn-coll model iteration {}))
-  ([config fn-coll model iteration this]
+  ([config fn-coll model context]
+   (run-fns config fn-coll model context {}))
+  ([config fn-coll model context this]
    (if (empty? fn-coll)
      this
      (let [function (first fn-coll)
-           new-this (function this model :count iteration :config config)
+           context-list (mapcat identity (into [] context))
+           arg-list (list* this model :config config context-list)
+           ;; _ (println "ARG LIST" arg-list)
+           new-this (apply function arg-list)
+           ;; new-this (function this model :count iteration :config config)
            new-fn-coll (rest fn-coll)]
-       (recur config new-fn-coll model iteration new-this)))))
+       (recur config new-fn-coll model context new-this)))))
 
 (defn coerce-dates
   [item data]
@@ -66,7 +70,7 @@
       (do
         (println table "iteration done, closing insert channel")
         (close! insert-ch))
-      (let [item (run-fns config fn-list {} iteration)
+      (let [item (run-fns config fn-list {} {:iteration iteration})
             skip? (->> item vals (some #{:none}))] ;; Select association returned nothing
         (when-not skip?
           (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub))
@@ -99,12 +103,12 @@
       (let [quantity-fn (-> config :models table :quantity-fn)
             probability-fn (-> config :models table :probability-fn)
             quantity (-> (quantity-fn :quantity {} src-item :iteration iteration) :quantity)]
-        (doseq [_ (range quantity)]
+        (doseq [n (range quantity)]
           (let [fn-list (-> config :models table :fn-list)
                 data (-> config :models table)
-                item (run-fns config fn-list src-item iteration)
+                item (run-fns config fn-list src-item {:iteration iteration :sequence n})
                 create? (-> (probability-fn :create? {} src-item :iteration iteration) :create?)
-                skip? (->> item vals (some #{:none}))] ; Field failed to genrate association
+                skip? (->> item vals (some #{:none}))] ; Field failed to generate association
             (when-not (or skip? (not create?))
               (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub)))))
         (recur config dependencies table src-ch insert-ch)))))
