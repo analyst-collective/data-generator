@@ -16,13 +16,13 @@ This tool can be used as a standalone JAR or as a library in any JVM language.
 
 ## Usage
 
-# Standalone
+### Standalone
 
     $ java -jar data-generator-X.X.X-standalone.jar <filename of config here>
 
 Note: Currently only supports json files
 
-# Programmatic
+### Programmatic
 
 `(data-generator.core/generate-data <insert config MAP here>)`
 
