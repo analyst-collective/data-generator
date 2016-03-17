@@ -30,7 +30,7 @@
      (#{"string" "text"} ftype) :text
      (re-find  #"^(var)(char)?([\s]*)?(\(([\d]*)\))?$" ftype) :text
      (#{"real" "float"} ftype) :real
-     (#{"double"} ftype) :double
+     (#{"double"} ftype) :double-precision
      (#{"bigint" "biginteger"} ftype) (if autoincrement?
                                         :bigserial
                                         :biginteger)

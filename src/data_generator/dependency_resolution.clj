@@ -41,7 +41,7 @@
     agg
     (cond
       (:master fdata) (update agg :source #(conj % (-> fdata :master :model keyword)))
-      :select (update agg :select #(conj % (-> fdata :select :model keyword))))))
+      :select (update agg :select #(conj % (-> fdata :value :model keyword))))))
 
 (defn table-deps
   "agg starts as {} and builds a list of each tables dependencies"

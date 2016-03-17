@@ -167,7 +167,7 @@
     (let [other (apply hash-map more)
           ;; properties (current-properties properties (:count other))
           insert-x (s/replace equation #"(^| )(x)($| )" (str "$1" (:iteration other) "$3"))
-          insert-y (s/replace equation #"(^| )(y)($| )" (str "$1" (:sequence other) "$3"))
+          insert-y (s/replace insert-x #"(^| )(y)($| )" (str "$1" (:sequence other) "$3"))
           equation-replaced (s/replace insert-y #"\s\^\s" " ** ")
           equation-split (s/split equation-replaced #"\s+")
           equation-resolved (map #(resolve-references % this model) equation-split)
@@ -298,7 +298,7 @@
     (fn [mkey this model & more]
       (let [
             other (apply hash-map more)
-            properties (current-properties properties (:count other))
+            properties (current-properties properties (:iteration other))
             ;; insert-x (s/replace (:equation properties) #"x" (-> other :count str))
             ;; equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
             ;; equation-split (s/split equation-replaced #"\s+")
@@ -447,6 +447,7 @@
 (defn generators
   [config dependencies]
   (let [models (:models config)
+        _ (println models)
         new-models (reduce-kv (fn [m table data]
                                 (let [fn-list (build-model-generator config table data dependencies)
                                       added-association-data (association-data data)

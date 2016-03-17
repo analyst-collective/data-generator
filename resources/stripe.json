@@ -7,6 +7,39 @@
     "port": 5432
   },
   "models": {
+    "plan": {
+      "model": {
+        "id": {
+          "primarykey": true,
+          "type": "string",
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "amount": {
+          "type": "integer",
+          "master": {
+            "count": 3
+          },
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "2.5 * x ^ 2 + 42.5 * x + 5"
+            }
+          }
+        },
+        "popularity": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "10 - 3 * x"
+            }
+          }
+        }
+      }
+    },
     "customer": {
       "model": {
         "id_virtual": {
@@ -14,9 +47,6 @@
           "virtual": true,
           "value": {
             "type": "uuid"
-          },
-          "master": {
-            "count": 1000
           }
         },
         "id": {
@@ -26,6 +56,28 @@
             "type": "concat",
             "properties": {
               "values": ["cus_", "$self.id_virtual"]
+            }
+          }
+        },
+        "decay_virtual": {
+          "type": "double",
+          "virtual": true,
+          "master": {
+            "count": 1000
+          },
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "x / 50"
+            }
+          }
+        },
+        "created": {
+          "type": "integer",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "1395065886 + 51840 * x * 0.98 ^ $self.decay_virtual"
             }
           }
         }
@@ -168,8 +220,7 @@
           "value": {
             "type": "enum",
             "weights": {
-              "month": 5,
-              "year": 5
+              "month": 1
             }
           }
         },
@@ -180,11 +231,18 @@
             "quantity": {
               "type": "enum",
               "weights": {
-                "1": 6,
-                "2": 3,
-                "3": 1
+                "1": 90,
+                "2": 8,
+                "3": 2
               }
             }
+          }
+        },
+        "plan": {
+          "type": "association",
+          "value": {
+            "model": "plan",
+            "weight": "popularity"
           }
         }
       }

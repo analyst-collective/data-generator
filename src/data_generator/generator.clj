@@ -133,8 +133,9 @@
                               {}
                               (-> config :models table :model))
             iterations (range (:count master))]
-        (println "Launching" table "with iteration")
+        (println "Launching" table "with iteration. Count:" (:count master))
         (generate-model* config dependencies table iterations insert-ch)
+        (println "Should be soon closeing src-pub of" table)
         (signal-model-complete table inserting-done-ch done-ch src-pub)
         true)))) ; Mark model done (when run via clojure.async.core/thread without returning nil
 
@@ -150,6 +151,7 @@
   (let [model-done-chans (map (fn [[table _]]
                                 (thread (generate-model config dependencies table)))
                               (:models config))
+        _ (println "LAUNCHED" (count model-done-chans) "THREADS FOR MODELS")
         all-done-ch (a/merge model-done-chans)]
     (signal-all-done all-done-ch)
     config))

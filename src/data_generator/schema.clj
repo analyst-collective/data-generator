@@ -73,7 +73,6 @@
         db-spec (:database config)
         all-statements (reduce-kv (fn [all-statements table data]
                                 (let [model (:model data)
-                                      _ (println "about to filter" model)
                                       statements (->> model
                                                       (filter (fn [[field fdata]]
                                                                 (:virtual fdata)))
