@@ -197,7 +197,8 @@
   [value type-norm]
   (fn [mkey this model & more]
     (let [generated (uuid)]
-      (assoc this mkey generated))))
+      {:this (assoc this mkey generated)
+       :models model})))
 
 (defmethod field-data* "concat"
   [value type-norm]
@@ -205,12 +206,14 @@
     (let [values (-> value :properties :values)
           resolved-values (map #(resolve-references % this model) values)
           joined (s/join "" resolved-values)]
-      (assoc this mkey joined))))
+      {:this (assoc this mkey joined)
+       :models model})))
 
 (defmethod field-data* "autoincrement"
   [value type-norm]
   (fn [mkey this model & more]
-    this))
+    {:this this
+     :models model}))
 
 (defmethod field-data* "enum"
   [value type-norm]
@@ -221,7 +224,8 @@
                        (repeat (resolve-references v this model)
                                (resolve-references (coerce k type-norm) this model)))
                      weights)]
-        (assoc this mkey (resolve-references (rand-nth options) this model))))))
+        {:this (assoc this mkey (resolve-references (rand-nth options) this model))
+         :models model}))))
 
 (defmethod field-data* "range"
   [value type-norm]
@@ -232,30 +236,28 @@
                                               (let [maximum (resolve-references maximum this model)
                                                     minimum (resolve-references minimum this model)
                                                     diff (-' maximum minimum)]
-                                                (assoc this
-                                                       mkey
-                                                       (-> diff rand bigint (+' minimum)))))
+                                                {:this (assoc this mkey (-> diff
+                                                                            rand bigint
+                                                                            (+' minimum)))
+                                                 :models model}))
       (#{:integer :serial} type-norm) (fn [mkey this model & more]
                                         (let [maximum (resolve-references maximum this model)
                                               minimum (resolve-references minimum this model)
                                               diff (-' maximum minimum)]
-                                          (assoc this
-                                                 mkey
-                                                 (-> diff rand int (+ minimum)))))
+                                          {:this (assoc this mkey (-> diff rand int (+ minimum)))
+                                           :models model}))
       (#{:real} type-norm) (fn [mkey this model & more]
                              (let [maximum (resolve-references maximum this model)
                                    minimum (resolve-references minimum this model)
                                    diff (-' maximum minimum)]
-                               (assoc this
-                                      mkey
-                                      (-> diff rand float (+ minimum)))))
+                               {:this (assoc this mkey  (-> diff rand float (+ minimum)))
+                                :models model}))
       (#{:double} type-norm) (fn [mkey this model & more]
                                (let [maximum (resolve-references maximum this model)
                                      minimum (resolve-references minimum this model)
                                      diff (-' maximum minimum)]
-                                 (assoc this
-                                        mkey
-                                        (-> diff rand (+ minimum))))))))
+                                 {:this (assoc this mkey (-> diff rand (+ minimum)))
+                                  :models model})))))
 
 (defmethod field-data* "faker"
   [value type-norm]
@@ -269,13 +271,11 @@
                   resolved
                   (apply partial (cons resolved args)))]
     (fn [mkey this model & more]
-      (assoc this
-             mkey
-             (real-fn)))))
+      {:this (assoc this mkey (real-fn))
+       :models model})))
 
 (defmethod field-data* "distribution"
   [value type-norm]
-  ;; (println "VALUE" value)
   (let [dist (-> value :properties :type)
         ;; _ (println "DIST" dist)
         ;; _ (println "SYMBOL" (symbol "id" dist))
@@ -290,7 +290,8 @@
             real-fn (if (empty? resolved-args)
                       resolved
                       (apply partial (cons resolved resolved-args)))]
-        (assoc this mkey (id/draw (real-fn)))))))
+        {:this (assoc this mkey (id/draw (real-fn)))
+         :models model}))))
 
 (defmethod field-data* "formula"
   [value type-norm]
@@ -309,7 +310,8 @@
             randomness (resolve-references (:randomness properties) this model)
             randomized (randomize-value calculated randomness)
             ]
-        (assoc this mkey randomized)))))
+        {:this (assoc this mkey randomized)
+         :models model}))))
 
 (defn normalize-filter
   [type-norm value]
@@ -328,7 +330,8 @@
             master? (:master fdata)]
         (if master?
           (fn [mkey this model & more]
-            (assoc this mkey (field model)))
+            {:this (assoc this mkey (field model))
+             :models model})
           (let [weight (-> fdata :value :weight keyword)
                 filter-criteria (-> fdata :value :filter)
                 filter-prepped (when filter-criteria
@@ -371,10 +374,13 @@
                             filter-prepped (query-filtered table filter-prepped)
                             :else (query table))
                     ;; _ (println "STATEMENT" query-statement)
-                    result (first (j/query database query-statement))]
+                    result (first (j/query database query-statement))
+                    new-models (assoc model table result)]
                 (if-not result
-                  (assoc this mkey :none)
-                  (assoc this mkey (field result))))))))
+                  {:this (assoc this mkey :none)
+                   :models new-models}
+                  {:this (assoc this mkey (field result))
+                   :models new-models}))))))
       (field-data* (:value fdata) type-norm))))
 
 (defn master-column
@@ -434,11 +440,13 @@
                          quantity-fn (if quantity
                                        (field-data* quantity :integer)
                                        (fn [mkey this model & more]
-                                         (assoc this mkey 1)))
+                                         {:this (assoc this mkey 1)
+                                          :model model}))
                          probability (or (-> fdata :master :probability)
                                          1)
                          probability-fn (fn [mkey this model & more]
-                                          (assoc this mkey (< (rand) probability)))
+                                          {:this (assoc this mkey (< (rand) probability))
+                                           :models model})
                          with-fns (assoc agg :quantity-fn quantity-fn :probability-fn probability-fn)]
                      with-fns))))
              data

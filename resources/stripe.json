@@ -55,7 +55,7 @@
           "value": {
             "type": "concat",
             "properties": {
-              "values": ["cus_", "$self.id_virtual"]
+              "values": ["cus_", "$$self.id_virtual"]
             }
           }
         },
@@ -77,7 +77,7 @@
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "1395065886 + 51840 * x * 0.98 ^ $self.decay_virtual"
+              "equation": "1395065886 + 51840 * x * 0.98 ^ $$self.decay_virtual"
             }
           }
         }
@@ -98,7 +98,7 @@
           "value": {
             "type": "concat",
             "properties": {
-              "values": ["in_", "$self.id_virtual"]
+              "values": ["in_", "$$self.id_virtual"]
             }
           }
         },
@@ -127,7 +127,7 @@
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "$self.date"
+              "equation": "$$self.date"
             }
           }
         },
@@ -136,7 +136,7 @@
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "$self.date"
+              "equation": "$$self.date"
             }
           }
         },
@@ -158,7 +158,7 @@
           "value": {
             "type": "enum",
             "weights": {
-              "$model.customer": 1
+              "$subscriptions.customer": 1
             }
           }
         },
@@ -176,7 +176,7 @@
           "type": "boolean",
           "value": {
             "type": "case",
-            "check": "$self.paid",
+            "check": "$$self.paid",
             "branches": {
               "true": {
                 "type": "enum",
@@ -211,7 +211,7 @@
           "value": {
             "type": "concat",
             "properties": {
-              "values": ["sub_", "$self.id_virtual"]
+              "values": ["sub_", "$$self.id_virtual"]
             }
           }
         },
