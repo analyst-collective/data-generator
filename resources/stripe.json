@@ -37,6 +37,27 @@
               "equation": "10 - 3 * x"
             }
           }
+        },
+        "interval": {
+          "type": "string",
+          "value": {
+            "type": "case",
+            "check": "$$self.amount < 100",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "monthly": 1
+                }
+              },
+              "false": {
+                "type": "enum",
+                "weights": {
+                  "yearly": 1
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -102,6 +123,15 @@
             }
           }
         },
+        "total": {
+          "type": "integer",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$subscriptions.plan_total": 1
+            }
+          }
+        },
         "date": {
           "type": "integer",
           "value": {
@@ -109,16 +139,6 @@
             "properties": {
               "min": 1408045611,
               "max": 1458045611
-            }
-          }
-        },
-        "total": {
-          "type": "integer",
-          "value": {
-            "type": "range",
-            "properties": {
-              "min": 50,
-              "max": 4000
             }
           }
         },
@@ -215,12 +235,13 @@
             }
           }
         },
-        "plan__interval": {
-          "type": "string",
+        "plan_total": {
+          "type": "integer",
+          "virtual": true,
           "value": {
             "type": "enum",
             "weights": {
-              "month": 1
+              "$plan.amount": 1
             }
           }
         },
@@ -238,7 +259,7 @@
             }
           }
         },
-        "plan": {
+        "plan__id": {
           "type": "association",
           "value": {
             "model": "plan",

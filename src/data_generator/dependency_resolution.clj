@@ -63,7 +63,6 @@
                                                        {:select #{} :source #{}}
                                                        (:model data))})
         intra-table (reduce-kv intra-deps {} (:model data))
-
         intra-table-associations (assoc-in added-table-deps
                                             [table :field-deps]
                                             (reduce-kv
@@ -73,17 +72,23 @@
                                                                  (if (keyword? value)
                                                                    (conj depset value)
                                                                    (let [model (first value)
-                                                                         field (some (fn [[field fdata]]
-                                                                                       (or (and (-> fdata
-                                                                                                    :master
-                                                                                                    :model)
-                                                                                                field)
-                                                                                           (and (-> fdata
-                                                                                                    :value
-                                                                                                    :model)
-                                                                                                field)))
+                                                                         assoc-field (some (fn [[mfield fdata]]
+                                                                                       (or (and (= (-> fdata
+                                                                                                       :master
+                                                                                                       :model
+                                                                                                       keyword)
+                                                                                                   model)
+                                                                                                mfield)
+                                                                                           (and (= (-> fdata
+                                                                                                       :value
+                                                                                                       :model
+                                                                                                       keyword)
+                                                                                                   model)
+                                                                                                mfield)))
                                                                                      (:model data))]
-                                                                     (conj depset field))))
+                                                                     (if assoc-field
+                                                                       (conj depset assoc-field)
+                                                                       depset))))
                                                                #{}
                                                                fset)]
                                                  (assoc m field new-fset)))

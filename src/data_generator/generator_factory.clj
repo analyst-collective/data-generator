@@ -120,7 +120,9 @@
   JSON requires string keys. JSON parsing turns string keys into keywords.
   Coercion of values into the final type is required"
   [value type]
-  (let [str-value (name value)]
+  (let [str-value (if (keyword? value)
+                    (name value)
+                    (str value))]
     (cond
       (#{:integer :serial} type) (Integer/parseInt str-value)
       (#{:bigserial :biginteger} type) (bigint str-value)
@@ -225,7 +227,9 @@
       (let [options (mapcat
                      (fn [[k v]]
                        (repeat (resolve-references v this model)
-                               (resolve-references (coerce k type-norm) this model)))
+                               ;; (resolve-references (coerce k type-norm) this model)
+                               (coerce (resolve-references (name k) this model) type-norm)
+                               ))
                      weights)]
         {:this (assoc this mkey (resolve-references (rand-nth options) this model))
          :models model}))))
