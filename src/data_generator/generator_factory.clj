@@ -131,12 +131,15 @@
       (#{:text} type) str-value)))
 
 (defn resolve-references
-  [raw this model]
+  [raw this models]
+  ;; (println raw this models)
   (if (instance? java.lang.String raw)
-    (if-let [field (->> raw (re-find #"^\$self\.(.+)$") second keyword)]
+    (if-let [field (->> raw (re-find #"^\$\$self\.(.+)$") second keyword)]
       (field this)
-      (if-let [field (->> raw (re-find #"^\$model\.(.+)$") second keyword)]
-        (field model)
+      (if-let #_[field (->> raw (re-find #"^\$model\.(.+)$") second keyword)]
+              [[model field] (->> raw (re-find #"^\$([^\$^\.]*)\.(.+)$") rest (map keyword) seq)]
+        ;; (field model)
+        (-> models model field)
         raw))
     raw))
 
@@ -326,12 +329,14 @@
         val-type (-> fdata :value :type)]
     (if association?
       (let [field (-> fdata :value :field keyword)
-            table (-> fdata :value :model keyword)
+            table (or (-> fdata :value :model keyword)
+                      (-> fdata :master :model keyword))
             master? (:master fdata)]
         (if master?
-          (fn [mkey this model & more]
-            {:this (assoc this mkey (field model))
-             :models model})
+          (fn [mkey this models & more]
+            ;; (println models table field)
+            {:this (assoc this mkey (-> models table field))
+             :models models})
           (let [weight (-> fdata :value :weight keyword)
                 filter-criteria (-> fdata :value :filter)
                 filter-prepped (when filter-criteria

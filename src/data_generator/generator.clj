@@ -96,7 +96,7 @@
   (let [{:keys [src-item iteration]} (<!! src-ch)
         src-pub (-> dependencies table :src-pub)]
     ;; (println table "GOT" src-item)
-    (println table src-table src-item)
+    ;; (println table src-table src-item)
     (if-not src-item
       (do
         (println table "recieved a nil! Closing insert channel")
@@ -104,7 +104,6 @@
       (let [quantity-fn (-> config :models table :quantity-fn)
             probability-fn (-> config :models table :probability-fn)
             quantity (-> (quantity-fn :quantity {} src-item :iteration iteration) :this :quantity)]
-        (println "quantity" quantity table "from" src-table)
         (doseq [n (range quantity)]
           (let [fn-list (-> config :models table :fn-list)
                 data (-> config :models table)
