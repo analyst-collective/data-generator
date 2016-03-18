@@ -1,6 +1,7 @@
 (ns data-generator.generator-factory
   (:require [clj-time.coerce :as c]
             [clojure.string :as s]
+            [taoensso.timbre :as timbre :refer [info warn error]]
             [clojure.java.jdbc :as j]
             [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
@@ -120,29 +121,39 @@
   JSON requires string keys. JSON parsing turns string keys into keywords.
   Coercion of values into the final type is required"
   [value type]
-  (let [str-value (if (keyword? value)
-                    (name value)
-                    (str value))]
-    (cond
-      (#{:integer :serial} type) (Integer/parseInt str-value)
-      (#{:bigserial :biginteger} type) (bigint str-value)
-      (#{:boolean} type) (Boolean/valueOf str-value)
-      (#{:real} type) ((Float/parseFloat str-value))
-      (#{:double} type) (Double/parseDouble str-value)
-      (#{:date :datetime :timestamp-with-time-zone} type) (c/from-long (Integer/parseInt value))
-      (#{:text} type) str-value)))
+  (if (nil? value)
+    value
+    (let [str-value (if (keyword? value)
+                      (name value)
+                      (str value))]
+      (cond
+        (#{:integer :serial} type) (Integer/parseInt str-value)
+        (#{:bigserial :biginteger} type) (bigint str-value)
+        (#{:boolean} type) (Boolean/valueOf str-value)
+        (#{:real} type) ((Float/parseFloat str-value))
+        (#{:double} type) (Double/parseDouble str-value)
+        (#{:date :datetime :timestamp-with-time-zone} type) (c/from-long (Integer/parseInt value))
+        (#{:text} type) str-value))))
 
 (defn resolve-references
   [raw this models]
   ;; (println raw this models)
   (if (instance? java.lang.String raw)
-    (if-let [field (->> raw (re-find #"^\$\$self\.(.+)$") second keyword)]
-      (field this)
-      (if-let #_[field (->> raw (re-find #"^\$model\.(.+)$") second keyword)]
-              [[model field] (->> raw (re-find #"^\$([^\$^\.]*)\.(.+)$") rest (map keyword) seq)]
-        ;; (field model)
-        (-> models model field)
-        raw))
+    (if-let [nil-val (re-find #"\$\$(?:null|nil)" raw)]
+      nil
+      (if-let [field (->> raw (re-find #"^\$\$self\.(.+)$") second keyword)]
+        (field this)
+        (if-let [[model field] (->> raw (re-find #"^\$([^\$^\.]*)\.(.+)$") rest (map keyword) seq)]
+          (-> models model field)
+          (if-let [match (->> raw (re-find #"\$\$mult\$([^$\.]*)\$(\d+\.\d+)\.(\w+)") rest seq)]
+            (let [
+                  ;; _ (println "MULT MATCH" raw match)
+                  index (-> match second (#(Float/parseFloat %)) int)
+                  field (keyword (last match))
+                  model (keyword (first match))]
+              ;; (println "MULT GET" models model index field)
+              (-> models model (get index) field))
+              raw))))
     raw))
 
 (defn current-properties
@@ -169,15 +180,29 @@
   [equation this model more]
   (if-not (instance? java.lang.String equation)
     equation ; nothing to calculate
-    (let [other (apply hash-map more)
+    (let [sub-equations (re-seq #"\(([^\)]+)\)" equation)
+          sub-evaluated (reduce (fn [eq [to-replace to-calc]]
+                                  (let [calculated (calculate-formula to-calc this model more)
+                                        replaced (s/replace eq to-replace (str calculated))]
+                                    replaced))
+                                equation
+                                sub-equations)
+          other (apply hash-map more)
           ;; properties (current-properties properties (:count other))
-          insert-x (s/replace equation #"(^| )(x)($| )" (str "$1" (:iteration other) "$3"))
+          insert-x (s/replace sub-evaluated #"(^| )(x)($| )" (str "$1" (:iteration other) "$3"))
           insert-y (s/replace insert-x #"(^| )(y)($| )" (str "$1" (:sequence other) "$3"))
-          equation-replaced (s/replace insert-y #"\s\^\s" " ** ")
+          insert-z (s/replace insert-y #"(^| )(z)($| )" (str "$1" (:quantity other) "$3"))
+          equation-replaced (s/replace insert-z #"\s\^\s" " ** ")
           equation-split (s/split equation-replaced #"\s+")
           equation-resolved (map #(resolve-references % this model) equation-split)
           primitives (map str->primitive equation-resolved)
-          calculated (apply (functionize $=) primitives)]
+          ;; _ (info "primitives" (doall primitives))
+          
+          calculated (try (if (> (count primitives) 1) ; If there's only 1 primitive, no calculation required
+                            (apply (functionize $=) primitives) ; this allows strings to be returned as well
+                            (first primitives))
+                          (catch Exception e (do (println "PROBLEM" primitives)
+                                                 (throw e))))]
       calculated)))
 
 (defmulti field-data* (fn [value _]
@@ -193,7 +218,9 @@
       (let [evaluated (calculate-formula (:check value) this model more)
             chosen-fn ((-> evaluated str keyword) result-fns)
             args (list* mkey this model more)]
-        (apply chosen-fn args)))))
+        (try (apply chosen-fn args)
+             (catch Exception e (do (println "CASE ERROR" value evaluated chosen-fn args)
+                                    (throw e))))))))
 
 (defn uuid []
   (str (java.util.UUID/randomUUID)))
@@ -328,6 +355,7 @@
 
 (defn field-data
   [config fdata]
+  (println fdata)
   (let [type-norm (:type-norm fdata)
         association? (-> fdata :type s/lower-case (= "association"))
         val-type (-> fdata :value :type)]
@@ -342,30 +370,34 @@
             {:this (assoc this mkey (-> models table field))
              :models models})
           (let [weight (-> fdata :value :weight keyword)
-                filter-criteria (-> fdata :value :filter)
-                filter-prepped (when filter-criteria
-                                 (->> filter-criteria
-                                      (#(s/split %  #"\s+"))
-                                      (map
-                                       #(cond
-                                          ((complement instance?) java.lang.String %) %
-                                          (re-find #"^\$model\.(.+)$" %) (->> %
-                                                                              (re-find
-                                                                               #"^\$model\.(.+)$")
-                                                                              second
-                                                                              keyword)
-                                          :else %))))
-                filter-field (when filter-prepped
-                              (some #(and (keyword? %) %) filter-prepped))
-                ;; _ (println "FILTER FIELD" filter-field)
-                filter-type (when filter-field
-                              (-> config :models table :model filter-field :type-norm))]
+                
+                ]
             ;; (println "PREPPED" filter-prepped)
             (fn [mkey this model & more]
-              (let [other (apply hash-map more)
+              (let [filter-criteria (-> fdata :value :filter)
+                    filter-prepped (when filter-criteria
+                                     (->> filter-criteria
+                                          (#(s/split %  #"\s+"))
+                                          (map
+                                           #(cond
+                                              ((complement instance?) java.lang.String %) %
+                                              (re-find #"^\$([^\$^\.]*)\.(.+)$" %) (->> %
+                                                                                        (re-find
+                                                                                         #"^\$[^\$^\.]*\.(.+)$")
+                                                                                        ;; #"^\$model\.(.+)$")
+                                                                                        last
+                                                                                        keyword)
+                                              :else %))))
+                    filter-field (when filter-prepped
+                                   (some #(and (keyword? %) %) filter-prepped))
+                    ;; _ (println "FILTER FIELD" filter-field)
+                    filter-type (when filter-field
+                                  (-> config :models table :model filter-field :type-norm))
+                    other (apply hash-map more)
                     database (-> other :config :database)
-                    ;; _ (println "PREPPED2" filter-criteria)
+                    ;; _ (println "PREPPED" filter-prepped)
                     resolved-where (map #(resolve-references % this model) filter-prepped)
+                    ;; _ (println "RESOLVED" resolved-where)
                     primitives-where (map str->primitive resolved-where)
                     ;; _ (println "RESOLVED WHERE" resolved-where)
                     ;; _ (println "RESOLVED TYPE" (class (second resolved-where)))
@@ -373,15 +405,15 @@
                     normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
                                               primitives-where)
                     query-statement (cond
-                            (and weight filter-prepped) (query-filtered-weighted table
-                                                                                 ;; filter-prepped
-                                                                                 ;; primitives-where
-                                                                                 normalized-where
-                                                                                 weight
-                                                                                 field)
-                            weight (query-weighted table weight field)
-                            filter-prepped (query-filtered table filter-prepped)
-                            :else (query table))
+                                      (and weight filter-prepped) (query-filtered-weighted table
+                                                                                           ;; filter-prepped
+                                                                                           ;; primitives-where
+                                                                                           normalized-where
+                                                                                           weight
+                                                                                           field)
+                                      weight (query-weighted table weight field)
+                                      filter-prepped (query-filtered table filter-prepped)
+                                      :else (query table))
                     ;; _ (println "STATEMENT" query-statement)
                     result (first (j/query database query-statement))
                     new-models (assoc model table result)]

@@ -265,9 +265,96 @@
             "model": "plan",
             "weight": "popularity"
           }
+        },
+        "closed_odds": {
+          "type": "real",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0,
+              "max": 1
+            }
+          }
+        },
+        "interval_int": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "case",
+            "check": "$plan.interval",
+            "branches": {
+              "monthly": {
+                "type": "enum",
+                "weights": {
+                  "2635200": 1
+                }
+              },
+              "yearly": {
+                "type": "enum",
+                "weights": {
+                  "31536000": 1
+                }
+              }
+            }
+          }
+        },
+        "interval_count": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 1,
+              "max": 3
+            }
+          }
+        },
+        "ended_at": {
+          "type": "integer",
+          "value": {
+            "type": "case",
+            "check": "z - y <= 1",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "$$null": 1
+                }
+              },
+              "false": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$$self.start + $$self.interval_count * $$self.interval_int"
+                }
+              }
+            }
+          }
+        },
+        "start": {
+          "type": "integer",
+          "value": {
+            "type": "case",
+            "check": "y == 0",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "$customer.created": 1
+                }
+              },
+              "false": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$$mult$subscriptions$(y - 1).ended_at"
+                }
+              }
+            }
+          }
         }
       }
     }
   }
 }
+
 
