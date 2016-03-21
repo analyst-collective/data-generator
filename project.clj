@@ -12,7 +12,8 @@
                  [clj-time "0.11.0"]
                  [faker "0.2.2"]
                  [incanter "1.5.7"]
-                 [org.clojure/core.async "0.2.374"]]
+                 [org.clojure/core.async "0.2.374"]
+                 [com.taoensso/timbre "4.3.1"]]
   :main ^:skip-aot data-generator.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})

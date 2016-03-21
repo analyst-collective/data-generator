@@ -1,25 +1,38 @@
 (ns data-generator.dependency-resolution
   (:require [clojure.core.async :as a :refer [chan mult tap]]))
 
+(defn add-refs
+  [refs v]
+  (let [fields (->> v
+                    (re-seq #"(?:^|\s)\$\$self\.(\w+)")
+                    (map last)
+                    (map keyword)
+                    set)
+        associations (->> v
+                          (re-seq #"(?:^| )\$([\w]*)\.(\w+)")
+                          (map rest)
+                          (map #(map keyword %))
+                          set)]
+    ;; (println "REFS" refs fields associations)
+    (clojure.set/union refs fields associations)))
+
 (defn ref-locate
  "Recursively check values for $self.<field_name> to identify which fields (on this model) this field depends on.
 
   agg starts as empty set #{}"
   [agg k v]
-  (cond
-    (instance? java.lang.String v) (let [fields (->> v
-                                                    (re-seq #"(?:^|\s)\$self\.(\w+)")
-                                                    (map last)
-                                                    (map keyword)
-                                                    set)]
-                                     (if-not (seq fields)
-                                       agg
-                                       (clojure.set/union agg fields)))
-    (or (instance? clojure.lang.IPersistentMap v)
-        (instance? clojure.lang.IPersistentVector v)) (reduce-kv ref-locate
-                                                            agg
-                                                            v)
-    :default agg))
+  (let [key-refs (add-refs agg (if (keyword k)
+                                 (name k)
+                                 (str k)))
+        val-refs (cond
+                   (instance? java.lang.String v) (add-refs agg v)
+                   (or (instance? clojure.lang.IPersistentMap v)
+                       (instance? clojure.lang.IPersistentVector v)) (reduce-kv ref-locate
+                                                                                agg
+                                                                                v)
+                   :default agg)]
+    (println "REFS" key-refs val-refs)
+    (clojure.set/union key-refs val-refs)))
 
 (defn intra-deps
   "Builds a map of sets for each field on this model saving which other fields on this model they depend on
@@ -46,13 +59,45 @@
 (defn table-deps
   "agg starts as {} and builds a list of each tables dependencies"
   [agg table data]
-  (let [added-table-deps (assoc agg table {:table-dep (reduce-kv field-deps
-                                                                 {:select #{} :source #{}}
-                                                                 (:model data))})
-        intra-table (assoc-in added-table-deps [table :field-deps] (reduce-kv intra-deps
-                                                                               {}
-                                                                               (:model data)))]
-    intra-table))
+  (let [added-table-deps (assoc agg
+                                table
+                                {:table-dep (reduce-kv field-deps
+                                                       {:select #{} :source #{}}
+                                                       (:model data))})
+        _ (println "TABLE DEPS" added-table-deps)
+        intra-table (reduce-kv intra-deps {} (:model data))
+        intra-table-associations (assoc-in added-table-deps
+                                            [table :field-deps]
+                                            (reduce-kv
+                                             (fn [m field fset]
+                                               (let [new-fset (reduce
+                                                               (fn [depset value]
+                                                                 (if (keyword? value)
+                                                                   (conj depset value)
+                                                                   (let [model (first value)
+                                                                         assoc-field (some (fn [[mfield fdata]]
+                                                                                       (or (and (= (-> fdata
+                                                                                                       :master
+                                                                                                       :model
+                                                                                                       keyword)
+                                                                                                   model)
+                                                                                                mfield)
+                                                                                           (and (= (-> fdata
+                                                                                                       :value
+                                                                                                       :model
+                                                                                                       keyword)
+                                                                                                   model)
+                                                                                                mfield)))
+                                                                                     (:model data))]
+                                                                     (if assoc-field
+                                                                       (conj depset assoc-field)
+                                                                       depset))))
+                                                               #{}
+                                                               fset)]
+                                                 (assoc m field new-fset)))
+                                             {}
+                                             intra-table))]
+    intra-table-associations))
 
 (defn chan-setup
   [dependencies]

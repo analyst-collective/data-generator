@@ -33,7 +33,7 @@
      (#{"double"} ftype) :double-precision
      (#{"bigint" "biginteger"} ftype) (if autoincrement?
                                         :bigserial
-                                        :biginteger)
+                                        :bigint)
      (#{"date"} ftype) :date
      (#{"datetime" "timestamp" "timestamp with timezone"} ftype) :timestamp-with-time-zone
      (#{"bool" "boolean"} ftype) :boolean

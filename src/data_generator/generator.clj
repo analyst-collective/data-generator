@@ -31,7 +31,10 @@
         insert-statement (sql/sql (sql/insert pg table []
                                        (sql/values [model])))
         prepped [(first insert-statement) (rest insert-statement)]
-        row (apply j/db-do-prepared-return-keys db-spec prepped)]
+        ;; _ (println "INSERT PREPPED" prepped)
+        row (try (apply j/db-do-prepared-return-keys db-spec prepped)
+                 (catch Exception e (do (println "TROUBLE" prepped)
+                                         (throw e))))]
     ;; (println "ROW" row)
     (when out-chan
       (>!! out-chan {:src-item row :iteration iteration}))))
@@ -44,12 +47,16 @@
      this
      (let [function (first fn-coll)
            context-list (mapcat identity (into [] context))
-           arg-list (list* this model :config config context-list)
-           ;; _ (println "ARG LIST" arg-list)
-           new-this (apply function arg-list)
+           arg-list (list* (:key function) this model :config config context-list)
+           ;; arg-list (list* this model :config config context-list)
+           results (try (apply (:fn function) arg-list)
+                        (catch Exception e (do (println "RUNFNS-PRE" function (class arg-list) (first arg-list))
+                                               (println "RUNFNS" this model context-list arg-list)
+                                               (throw e))))
+           {new-this :this new-models :models} results
            ;; new-this (function this model :count iteration :config config)
            new-fn-coll (rest fn-coll)]
-       (recur config new-fn-coll model context new-this)))))
+       (recur config new-fn-coll new-models context new-this)))))
 
 (defn coerce-dates
   [item data]
@@ -91,27 +98,52 @@
         (close! signal-ch))
       (recur table listen-ch signal-ch pub-ch))))
 
+(defn generate-model-from-source-helper
+  [config table src-item models insert-ch src-pub context seq-range]
+  (if-let [n (first seq-range)]
+    (let [fn-list (-> config :models table :fn-list)
+          data (-> config :models table)
+          new-context (assoc context :sequence n)
+          item (run-fns config fn-list models new-context)
+          new-models (update models table #(into [] (conj % item)))
+          probability-fn (-> config :models table :probability-fn)
+          create? (-> probability-fn (apply (list* :create? {} new-models context)) :this :create?)
+          skip? (->> item vals (some #{:none}))]
+      (when-not (or skip? (not create?))
+        (let [iteration (:iteration new-context)]
+          (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub))))
+      (recur config table src-item new-models insert-ch src-pub new-context (rest seq-range)))))
+
 (defn generate-model-from-source*
-  [config dependencies table src-ch insert-ch]
+  [config dependencies table src-table src-ch insert-ch]
   (let [{:keys [src-item iteration]} (<!! src-ch)
         src-pub (-> dependencies table :src-pub)]
     ;; (println table "GOT" src-item)
+    ;; (println table src-table src-item)
     (if-not src-item
       (do
         (println table "recieved a nil! Closing insert channel")
         (close! insert-ch))
       (let [quantity-fn (-> config :models table :quantity-fn)
-            probability-fn (-> config :models table :probability-fn)
-            quantity (-> (quantity-fn :quantity {} src-item :iteration iteration) :quantity)]
-        (doseq [n (range quantity)]
+            ;; probability-fn (-> config :models table :probability-fn)
+            quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration) :this :quantity)]
+        #_(doseq [n (range quantity)]
           (let [fn-list (-> config :models table :fn-list)
                 data (-> config :models table)
-                item (run-fns config fn-list src-item {:iteration iteration :sequence n})
-                create? (-> (probability-fn :create? {} src-item :iteration iteration) :create?)
+                item (run-fns config fn-list {src-table src-item} {:iteration iteration :sequence n})
+                create? (-> (probability-fn :create? {} src-item :iteration iteration) :this :create?)
                 skip? (->> item vals (some #{:none}))] ; Field failed to generate association
             (when-not (or skip? (not create?))
               (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub)))))
-        (recur config dependencies table src-ch insert-ch)))))
+        (generate-model-from-source-helper config
+                                           table
+                                           src-item
+                                           {src-table src-item}
+                                           insert-ch
+                                           src-pub
+                                           {:iteration iteration :quantity quantity}
+                                           (range quantity))
+        (recur config dependencies table src-table src-ch insert-ch)))))
 
 (defn generate-model
   [config dependencies table]
@@ -121,9 +153,9 @@
         src-sub (-> dependencies table :src-sub)
         src-pub (-> dependencies table :src-pub)]
     (if src-sub
-      (do
+      (let [src-table (-> dependencies table :table-dep :source first)]
         (println "Launching" table "with channel source")
-        (generate-model-from-source* config dependencies table src-sub insert-ch)
+        (generate-model-from-source* config dependencies table src-table src-sub insert-ch)
         (println "Should be soon closeing src-pub of" table)
         (signal-model-complete table inserting-done-ch done-ch src-pub))
       (let [master (reduce-kv (fn [m field fdata]

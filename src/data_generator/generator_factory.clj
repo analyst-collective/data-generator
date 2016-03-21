@@ -1,6 +1,7 @@
 (ns data-generator.generator-factory
   (:require [clj-time.coerce :as c]
             [clojure.string :as s]
+            [taoensso.timbre :as timbre :refer [info warn error]]
             [clojure.java.jdbc :as j]
             [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
@@ -120,24 +121,39 @@
   JSON requires string keys. JSON parsing turns string keys into keywords.
   Coercion of values into the final type is required"
   [value type]
-  (let [str-value (name value)]
-    (cond
-      (#{:integer :serial} type) (Integer/parseInt str-value)
-      (#{:bigserial :biginteger} type) (bigint str-value)
-      (#{:boolean} type) (Boolean/valueOf str-value)
-      (#{:real} type) ((Float/parseFloat str-value))
-      (#{:double} type) (Double/parseDouble str-value)
-      (#{:date :datetime :timestamp-with-time-zone} type) (c/from-long (Integer/parseInt value))
-      (#{:text} type) str-value)))
+  (if (nil? value)
+    value
+    (let [str-value (if (keyword? value)
+                      (name value)
+                      (str value))]
+      (cond
+        (#{:integer :serial} type) (Integer/parseInt str-value)
+        (#{:bigserial :bigint} type) (bigint str-value)
+        (#{:boolean} type) (Boolean/valueOf str-value)
+        (#{:real} type) ((Float/parseFloat str-value))
+        (#{:double} type) (Double/parseDouble str-value)
+        (#{:date :datetime :timestamp-with-time-zone} type) (c/from-long (Integer/parseInt value))
+        (#{:text} type) str-value))))
 
 (defn resolve-references
-  [raw this model]
+  [raw this models]
+  ;; (println raw this models)
   (if (instance? java.lang.String raw)
-    (if-let [field (->> raw (re-find #"^\$self\.(.+)$") second keyword)]
-      (field this)
-      (if-let [field (->> raw (re-find #"^\$model\.(.+)$") second keyword)]
-        (field model)
-        raw))
+    (if-let [nil-val (re-find #"\$\$(?:null|nil)" raw)]
+      nil
+      (if-let [field (->> raw (re-find #"^\$\$self\.(.+)$") second keyword)]
+        (field this)
+        (if-let [[model field] (->> raw (re-find #"^\$([^\$^\.]*)\.(.+)$") rest (map keyword) seq)]
+          (-> models model field)
+          (if-let [match (->> raw (re-find #"\$\$mult\$([^$\.]*)\$(\d+\.\d+)\.(\w+)") rest seq)]
+            (let [
+                  ;; _ (println "MULT MATCH" raw match)
+                  index (-> match second (#(Float/parseFloat %)) int)
+                  field (keyword (last match))
+                  model (keyword (first match))]
+              ;; (println "MULT GET" models model index field)
+              (-> models model (get index) field))
+              raw))))
     raw))
 
 (defn current-properties
@@ -164,15 +180,29 @@
   [equation this model more]
   (if-not (instance? java.lang.String equation)
     equation ; nothing to calculate
-    (let [other (apply hash-map more)
+    (let [sub-equations (re-seq #"\(([^\)]+)\)" equation)
+          sub-evaluated (reduce (fn [eq [to-replace to-calc]]
+                                  (let [calculated (calculate-formula to-calc this model more)
+                                        replaced (s/replace eq to-replace (str calculated))]
+                                    replaced))
+                                equation
+                                sub-equations)
+          other (apply hash-map more)
           ;; properties (current-properties properties (:count other))
-          insert-x (s/replace equation #"(^| )(x)($| )" (str "$1" (:iteration other) "$3"))
+          insert-x (s/replace sub-evaluated #"(^| )(x)($| )" (str "$1" (:iteration other) "$3"))
           insert-y (s/replace insert-x #"(^| )(y)($| )" (str "$1" (:sequence other) "$3"))
-          equation-replaced (s/replace insert-y #"\s\^\s" " ** ")
+          insert-z (s/replace insert-y #"(^| )(z)($| )" (str "$1" (:quantity other) "$3"))
+          equation-replaced (s/replace insert-z #"\s\^\s" " ** ")
           equation-split (s/split equation-replaced #"\s+")
           equation-resolved (map #(resolve-references % this model) equation-split)
           primitives (map str->primitive equation-resolved)
-          calculated (apply (functionize $=) primitives)]
+          ;; _ (info "primitives" (doall primitives))
+          
+          calculated (try (if (> (count primitives) 1) ; If there's only 1 primitive, no calculation required
+                            (apply (functionize $=) primitives) ; this allows strings to be returned as well
+                            (first primitives))
+                          (catch Exception e (do (println "PROBLEM" primitives)
+                                                 (throw e))))]
       calculated)))
 
 (defmulti field-data* (fn [value _]
@@ -184,78 +214,115 @@
                                 (assoc m res (field-data* rvalue type-norm)))
                               {}
                               (:branches value))]
-    (fn [mkey this model & more]
-      (let [evaluated (calculate-formula (:check value) this model more)
-            chosen-fn ((-> evaluated str keyword) result-fns)
-            args (list* mkey this model more)]
-        (apply chosen-fn args)))))
+    (fn gf_case [mkey this model & more]
+      ;; (println mkey value)
+      (try (let [evaluated (calculate-formula (:check value) this model more)
+                 chosen-fn ((-> evaluated str keyword) result-fns)
+                 args (list* mkey this model more)]
+             (try (apply chosen-fn args)
+                  (catch Exception e (do (println "CASE ERROR" value evaluated chosen-fn args)
+                                         (throw e)))))
+           (catch Exception e2 (do (println "Case Error" mkey this model)
+                                   (throw e2)))))))
 
 (defn uuid []
   (str (java.util.UUID/randomUUID)))
 
 (defmethod field-data* "uuid"
   [value type-norm]
-  (fn [mkey this model & more]
-    (let [generated (uuid)]
-      (assoc this mkey generated))))
+  (fn gf_uuid [mkey this model & more]
+    ;; (println mkey value)
+    (try
+      (let [generated (uuid)]
+        {:this (assoc this mkey generated)
+         :models model})
+      (catch Exception e (do (println "UUID Error" mkey this model)
+                             (throw e))))))
 
 (defmethod field-data* "concat"
   [value type-norm]
-  (fn [mkey this model & more]
-    (let [values (-> value :properties :values)
-          resolved-values (map #(resolve-references % this model) values)
-          joined (s/join "" resolved-values)]
-      (assoc this mkey joined))))
+  (fn gf_concat [mkey this model & more]
+    ;; (println mkey value)
+    (try
+      (let [values (-> value :properties :values)
+            resolved-values (map #(resolve-references % this model) values)
+            joined (s/join "" resolved-values)]
+        {:this (assoc this mkey joined)
+         :models model})
+      (catch Exception e (do (println "Concat Error" mkey this model)
+                             (throw e))))))
 
 (defmethod field-data* "autoincrement"
   [value type-norm]
-  (fn [mkey this model & more]
-    this))
+  (fn gf_autoincrement [mkey this model & more]
+    ;; (println mkey value)
+    {:this this
+     :models model}))
 
 (defmethod field-data* "enum"
   [value type-norm]
   (let [weights (:weights value)]
-    (fn [mkey this model & more]
-      (let [options (mapcat
-                     (fn [[k v]]
-                       (repeat (resolve-references v this model)
-                               (resolve-references (coerce k type-norm) this model)))
-                     weights)]
-        (assoc this mkey (resolve-references (rand-nth options) this model))))))
+    (fn gf_enum [mkey this model & more]
+      ;; (println mkey value)
+      (try
+        (let [options (mapcat
+                       (fn [[k v]]
+                         (repeat (resolve-references v this model)
+                                 ;; (resolve-references (coerce k type-norm) this model)
+                                 (coerce (resolve-references (name k) this model) type-norm)
+                                 ))
+                       weights)
+              chosen (try (rand-nth options)
+                          (catch Exception e (do (println "OPTIONS" options weights)
+                                                 (throw e))))]
+          ;; (println "OPTIONS nth" chosen)
+          (try {:this (assoc this mkey (resolve-references chosen this model))
+                :models model}
+               (catch Exception e (do (println "THIS MKEY" this mkey chosen)
+                                      (throw e)))))
+        (catch Exception e2 (do (println "ENUM ERROR" mkey this model)
+                                (throw e2)))))))
 
 (defmethod field-data* "range"
   [value type-norm]
   (let [minimum (or (-> value :properties :min) 0)
         maximum (-> value :properties :max)]
     (cond
-      (#{:bigserial :biginteger} type-norm) (fn [mkey this model & more]
+      (#{:bigserial :bigint} type-norm) (fn gf_range [mkey this model & more]
+                                              ;; (println mkey value)
                                               (let [maximum (resolve-references maximum this model)
                                                     minimum (resolve-references minimum this model)
-                                                    diff (-' maximum minimum)]
-                                                (assoc this
-                                                       mkey
-                                                       (-> diff rand bigint (+' minimum)))))
-      (#{:integer :serial} type-norm) (fn [mkey this model & more]
+                                                    diff (try (-' maximum minimum)
+                                                              (catch Exception e (do (println "range exception"
+                                                                                              maximum
+                                                                                              minimum
+                                                                                              mkey this)
+                                                                                     (throw e))))]
+                                                {:this (assoc this mkey (-> diff
+                                                                            rand bigint
+                                                                            (+' minimum)))
+                                                 :models model}))
+      (#{:integer :serial} type-norm) (fn gf_range [mkey this model & more]
+                                        ;; (println mkey value)
                                         (let [maximum (resolve-references maximum this model)
                                               minimum (resolve-references minimum this model)
                                               diff (-' maximum minimum)]
-                                          (assoc this
-                                                 mkey
-                                                 (-> diff rand int (+ minimum)))))
-      (#{:real} type-norm) (fn [mkey this model & more]
+                                          {:this (assoc this mkey (-> diff rand int (+ minimum)))
+                                           :models model}))
+      (#{:real} type-norm) (fn gf_range [mkey this model & more]
+                             ;; (println mkey value)
                              (let [maximum (resolve-references maximum this model)
                                    minimum (resolve-references minimum this model)
                                    diff (-' maximum minimum)]
-                               (assoc this
-                                      mkey
-                                      (-> diff rand float (+ minimum)))))
-      (#{:double} type-norm) (fn [mkey this model & more]
+                               {:this (assoc this mkey  (-> diff rand float (+ minimum)))
+                                :models model}))
+      (#{:double} type-norm) (fn gf_range [mkey this model & more]
+                               ;; (println mkey value)
                                (let [maximum (resolve-references maximum this model)
                                      minimum (resolve-references minimum this model)
                                      diff (-' maximum minimum)]
-                                 (assoc this
-                                        mkey
-                                        (-> diff rand (+ minimum))))))))
+                                 {:this (assoc this mkey (-> diff rand (+ minimum)))
+                                  :models model})))))
 
 (defmethod field-data* "faker"
   [value type-norm]
@@ -268,48 +335,58 @@
         real-fn (if-not (seq args)
                   resolved
                   (apply partial (cons resolved args)))]
-    (fn [mkey this model & more]
-      (assoc this
-             mkey
-             (real-fn)))))
+    (fn gf_faker [mkey this model & more]
+      (try
+        {:this (assoc this mkey (real-fn))
+         :models model}
+        (catch Exception e (do (println "Faker error" mkey this model)
+                               (throw e)))))))
 
 (defmethod field-data* "distribution"
   [value type-norm]
-  ;; (println "VALUE" value)
   (let [dist (-> value :properties :type)
         ;; _ (println "DIST" dist)
         ;; _ (println "SYMBOL" (symbol "id" dist))
         arguments (or (-> value :properties :args) [])
         resolved (resolve (symbol "id" dist))]
     ;; (println "RESOLVED" resolved)
-    (fn [mkey this model & more]
-      ;; (println "THIS" this)
-      (let [resolved-args (map #(calculate-formula % this model more) ;#(resolve-references % this model)
-                               arguments)
-            ;; _ (println "RESOLVED ARGS" resolved-args)
-            real-fn (if (empty? resolved-args)
-                      resolved
-                      (apply partial (cons resolved resolved-args)))]
-        (assoc this mkey (id/draw (real-fn)))))))
+    (fn gf_dist [mkey this model & more]
+      ;; (println mkey value)
+      (try
+        (let [resolved-args (map #(calculate-formula % this model more) ;#(resolve-references % this model)
+                                 arguments)
+              ;; _ (println "RESOLVED ARGS" resolved-args)
+              real-fn (if (empty? resolved-args)
+                        resolved
+                        (apply partial (cons resolved resolved-args)))]
+          {:this (assoc this mkey (id/draw (real-fn)))
+           :models model})
+        (catch Exception e (do (println "Dist Error" mkey this model)
+                               (throw e)))))))
 
 (defmethod field-data* "formula"
   [value type-norm]
   (let [properties (:properties value)]
-    (fn [mkey this model & more]
-      (let [
-            other (apply hash-map more)
-            properties (current-properties properties (:iteration other))
-            ;; insert-x (s/replace (:equation properties) #"x" (-> other :count str))
-            ;; equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
-            ;; equation-split (s/split equation-replaced #"\s+")
-            ;; equation-resolved (map #(resolve-references % this model) equation-split)
-            ;; primitives (map str->primitive equation-resolved)
-            ;; calculated (apply (functionize $=) primitives)
-            calculated (calculate-formula (:equation properties) this model more)
-            randomness (resolve-references (:randomness properties) this model)
-            randomized (randomize-value calculated randomness)
-            ]
-        (assoc this mkey randomized)))))
+    (fn gf_formula [mkey this model & more]
+      ;; (println mkey value)
+      (try
+        (let [
+              other (apply hash-map more)
+              properties (current-properties properties (:iteration other))
+              ;; insert-x (s/replace (:equation properties) #"x" (-> other :count str))
+              ;; equation-replaced (s/replace insert-x #"\s\^\s" " ** ")
+              ;; equation-split (s/split equation-replaced #"\s+")
+              ;; equation-resolved (map #(resolve-references % this model) equation-split)
+              ;; primitives (map str->primitive equation-resolved)
+              ;; calculated (apply (functionize $=) primitives)
+              calculated (calculate-formula (:equation properties) this model more)
+              randomness (resolve-references (:randomness properties) this model)
+              randomized (randomize-value calculated randomness)
+              ]
+          {:this (assoc this mkey randomized)
+           :models model})
+        (catch Exception e (do (println "Formula Error" mkey this model)
+                               (throw e)))))))
 
 (defn normalize-filter
   [type-norm value]
@@ -319,41 +396,49 @@
 
 (defn field-data
   [config fdata]
+  ;; (println fdata)
   (let [type-norm (:type-norm fdata)
         association? (-> fdata :type s/lower-case (= "association"))
         val-type (-> fdata :value :type)]
     (if association?
       (let [field (-> fdata :value :field keyword)
-            table (-> fdata :value :model keyword)
+            table (or (-> fdata :value :model keyword)
+                      (-> fdata :master :model keyword))
             master? (:master fdata)]
         (if master?
-          (fn [mkey this model & more]
-            (assoc this mkey (field model)))
+          (fn gf_master_assoc [mkey this models & more]
+            ;; (println models table field)
+            {:this (assoc this mkey (-> models table field))
+             :models models})
           (let [weight (-> fdata :value :weight keyword)
-                filter-criteria (-> fdata :value :filter)
-                filter-prepped (when filter-criteria
-                                 (->> filter-criteria
-                                      (#(s/split %  #"\s+"))
-                                      (map
-                                       #(cond
-                                          ((complement instance?) java.lang.String %) %
-                                          (re-find #"^\$model\.(.+)$" %) (->> %
-                                                                              (re-find
-                                                                               #"^\$model\.(.+)$")
-                                                                              second
-                                                                              keyword)
-                                          :else %))))
-                filter-field (when filter-prepped
-                              (some #(and (keyword? %) %) filter-prepped))
-                ;; _ (println "FILTER FIELD" filter-field)
-                filter-type (when filter-field
-                              (-> config :models table :model filter-field :type-norm))]
+                
+                ]
             ;; (println "PREPPED" filter-prepped)
-            (fn [mkey this model & more]
-              (let [other (apply hash-map more)
+            (fn gf_query_assoc [mkey this model & more]
+              (let [filter-criteria (-> fdata :value :filter)
+                    filter-prepped (when filter-criteria
+                                     (->> filter-criteria
+                                          (#(s/split %  #"\s+"))
+                                          (map
+                                           #(cond
+                                              ((complement instance?) java.lang.String %) %
+                                              (re-find #"^\$([^\$^\.]*)\.(.+)$" %) (->> %
+                                                                                        (re-find
+                                                                                         #"^\$[^\$^\.]*\.(.+)$")
+                                                                                        ;; #"^\$model\.(.+)$")
+                                                                                        last
+                                                                                        keyword)
+                                              :else %))))
+                    filter-field (when filter-prepped
+                                   (some #(and (keyword? %) %) filter-prepped))
+                    ;; _ (println "FILTER FIELD" filter-field)
+                    filter-type (when filter-field
+                                  (-> config :models table :model filter-field :type-norm))
+                    other (apply hash-map more)
                     database (-> other :config :database)
-                    ;; _ (println "PREPPED2" filter-criteria)
+                    ;; _ (println "PREPPED" filter-prepped)
                     resolved-where (map #(resolve-references % this model) filter-prepped)
+                    ;; _ (println "RESOLVED" resolved-where)
                     primitives-where (map str->primitive resolved-where)
                     ;; _ (println "RESOLVED WHERE" resolved-where)
                     ;; _ (println "RESOLVED TYPE" (class (second resolved-where)))
@@ -361,20 +446,23 @@
                     normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
                                               primitives-where)
                     query-statement (cond
-                            (and weight filter-prepped) (query-filtered-weighted table
-                                                                                 ;; filter-prepped
-                                                                                 ;; primitives-where
-                                                                                 normalized-where
-                                                                                 weight
-                                                                                 field)
-                            weight (query-weighted table weight field)
-                            filter-prepped (query-filtered table filter-prepped)
-                            :else (query table))
+                                      (and weight filter-prepped) (query-filtered-weighted table
+                                                                                           ;; filter-prepped
+                                                                                           ;; primitives-where
+                                                                                           normalized-where
+                                                                                           weight
+                                                                                           field)
+                                      weight (query-weighted table weight field)
+                                      filter-prepped (query-filtered table filter-prepped)
+                                      :else (query table))
                     ;; _ (println "STATEMENT" query-statement)
-                    result (first (j/query database query-statement))]
+                    result (first (j/query database query-statement))
+                    new-models (assoc model table result)]
                 (if-not result
-                  (assoc this mkey :none)
-                  (assoc this mkey (field result))))))))
+                  {:this (assoc this mkey :none)
+                   :models new-models}
+                  {:this (assoc this mkey (field result))
+                   :models new-models}))))))
       (field-data* (:value fdata) type-norm))))
 
 (defn master-column
@@ -413,12 +501,13 @@
      fn-list
      (let [new-item (or (master-column config mdata)
                         (independant-column config mdata deps table)
-                        (throw (Exception. (str "Circular dependency!"))))
+                        (do (println "REMAINING DEPS" deps)
+                            (throw (Exception. (str "Circular dependency!")))))
            new-mdata (dissoc mdata (:key new-item))
            new-deps (remove-field-dep deps table (:key new-item))
-           new-fn-list (conj fn-list
-                             (partial (:fn new-item)
-                                      (:key new-item)))]
+           new-fn-list (conj fn-list new-item) #_(conj fn-list
+                                           (partial (:fn new-item)
+                                                    (:key new-item)))]
        (recur config table new-mdata new-deps new-fn-list)))))
 
 (defn association-data
@@ -434,11 +523,13 @@
                          quantity-fn (if quantity
                                        (field-data* quantity :integer)
                                        (fn [mkey this model & more]
-                                         (assoc this mkey 1)))
+                                         {:this (assoc this mkey 1)
+                                          :model model}))
                          probability (or (-> fdata :master :probability)
                                          1)
                          probability-fn (fn [mkey this model & more]
-                                          (assoc this mkey (< (rand) probability)))
+                                          {:this (assoc this mkey (< (rand) probability))
+                                           :models model})
                          with-fns (assoc agg :quantity-fn quantity-fn :probability-fn probability-fn)]
                      with-fns))))
              data
