@@ -13,6 +13,7 @@
                           (map rest)
                           (map #(map keyword %))
                           set)]
+    ;; (println "REFS" refs fields associations)
     (clojure.set/union refs fields associations)))
 
 (defn ref-locate
@@ -30,6 +31,7 @@
                                                                                 agg
                                                                                 v)
                    :default agg)]
+    (println "REFS" key-refs val-refs)
     (clojure.set/union key-refs val-refs)))
 
 (defn intra-deps
@@ -62,6 +64,7 @@
                                 {:table-dep (reduce-kv field-deps
                                                        {:select #{} :source #{}}
                                                        (:model data))})
+        _ (println "TABLE DEPS" added-table-deps)
         intra-table (reduce-kv intra-deps {} (:model data))
         intra-table-associations (assoc-in added-table-deps
                                             [table :field-deps]

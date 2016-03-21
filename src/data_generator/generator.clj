@@ -47,9 +47,13 @@
      this
      (let [function (first fn-coll)
            context-list (mapcat identity (into [] context))
-           arg-list (list* this model :config config context-list)
-           ;; _ (println "ARG LIST" arg-list)
-           {new-this :this new-models :models}  (apply function arg-list)
+           arg-list (list* (:key function) this model :config config context-list)
+           ;; arg-list (list* this model :config config context-list)
+           results (try (apply (:fn function) arg-list)
+                        (catch Exception e (do (println "RUNFNS-PRE" function (class arg-list) (first arg-list))
+                                               (println "RUNFNS" this model context-list arg-list)
+                                               (throw e))))
+           {new-this :this new-models :models} results
            ;; new-this (function this model :count iteration :config config)
            new-fn-coll (rest fn-coll)]
        (recur config new-fn-coll new-models context new-this)))))
@@ -122,7 +126,7 @@
         (close! insert-ch))
       (let [quantity-fn (-> config :models table :quantity-fn)
             ;; probability-fn (-> config :models table :probability-fn)
-            quantity (-> (quantity-fn :quantity {} src-item :iteration iteration) :this :quantity)]
+            quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration) :this :quantity)]
         #_(doseq [n (range quantity)]
           (let [fn-list (-> config :models table :fn-list)
                 data (-> config :models table)
