@@ -22,7 +22,6 @@
 
 (defn filter->where-criteria
   [[a op b]]
-  ;; (println "RECIEVED" a op b)
   (list op a b))
 
 (defn query-filtered
