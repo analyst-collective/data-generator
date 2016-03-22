@@ -30,15 +30,15 @@
      (#{"string" "text"} ftype) :text
      (re-find  #"^(var)(char)?([\s]*)?(\(([\d]*)\))?$" ftype) :text
      (#{"real" "float"} ftype) :real
-     (#{"double"} ftype) :double-precision
+     (#{"double" "double precision"} ftype) :double-precision
      (#{"bigint" "biginteger"} ftype) (if autoincrement?
                                         :bigserial
                                         :bigint)
      (#{"date"} ftype) :date
-     (#{"datetime" "timestamp" "timestamp with timezone"} ftype) :timestamp-with-time-zone
+     (#{"datetime" "timestamp" "timestamp with time zone"} ftype) :timestamp-with-time-zone
      (#{"bool" "boolean"} ftype) :boolean
                                         ; Throw error?
-     :default "UNKNOWN")))
+     :default (throw (Exception. (str "Field type " ftype " is invalid."))) #_"UNKNOWN")))
 
 (defn normalize-fields
   [[table data]]
@@ -66,31 +66,33 @@
 (defn association-field-transfer
   [config]
   (let [models (:models config)
-        new-models (reduce-kv (fn check-models [m table data]
-                                (let [model (:model data)
-                                      new-model (reduce-kv (fn check-fields [m1 field fdata]
-                                                   (if-not (= "association" (:type fdata))
-                                                     (assoc m1 field fdata)
-                                                     (let [data-map (or (:master fdata) (:value fdata))
-                                                           associated (-> data-map :model keyword)
-                                                           ;; _ (println associated fdata)
-                                                           mdata (-> models associated :model)
-                                                           ;; _ (println mdata)
-                                                           pk-info (some (fn [[k v]]
-                                                                  (and (:primarykey v)
-                                                                       ;; k
-                                                                       {:field k
-                                                                        :type-norm (normalize (:type v))}))
-                                                                mdata)
-                                                           updated-m1 (-> m1
-                                                                             (assoc-in [field :value :field]
-                                                                                       (:field pk-info))
-                                                                             (assoc-in [field :type-norm]
-                                                                                    (:type-norm pk-info)))]
-                                                       updated-m1)))
-                                                 model
-                                                 model)]
-                                  (assoc-in m [table :model] new-model)))
-                              models
-                              models)]
+        new-models (reduce-kv
+                    (fn check-models [m table data]
+                      (let [model (:model data)
+                            new-model (reduce-kv
+                                       (fn check-fields [m1 field fdata]
+                                         (if-not (= "association" (:type fdata))
+                                           (assoc m1 field fdata)
+                                           (let [data-map (or (:master fdata) (:value fdata))
+                                                 associated (-> data-map :model keyword)
+                                                 ;; _ (println associated fdata)
+                                                 mdata (-> models associated :model)
+                                                 ;; _ (println mdata)
+                                                 pk-info (some (fn [[k v]]
+                                                                 (and (:primarykey v)
+                                                                      ;; k
+                                                                      {:field k
+                                                                       :type-norm (normalize (:type v))}))
+                                                               mdata)
+                                                 updated-m1 (-> m1
+                                                                (assoc-in [field :value :field]
+                                                                          (:field pk-info))
+                                                                (assoc-in [field :type-norm]
+                                                                          (:type-norm pk-info)))]
+                                             updated-m1)))
+                                       model
+                                       model)]
+                        (assoc-in m [table :model] new-model)))
+                    models
+                    models)]
     (assoc config :models new-models)))

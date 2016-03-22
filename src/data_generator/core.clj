@@ -20,7 +20,7 @@
         dependencies (dep/resolve-deps config-prepped)
         _ (schema/create-tables config-prepped)
         _ (println "DEPENDENCIES" dependencies)]
-    (println "Got here")
+    (println "PREPPED CONFIG" config-prepped)
     (-> config-prepped
         (build/generators dependencies)
         (generator/generate dependencies)

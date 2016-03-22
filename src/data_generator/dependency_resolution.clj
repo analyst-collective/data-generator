@@ -4,12 +4,12 @@
 (defn add-refs
   [refs v]
   (let [fields (->> v
-                    (re-seq #"(?:^|\s)\$\$self\.(\w+)")
+                    (re-seq #"(?:^|\s|\()\$\$self\.(\w+)")
                     (map last)
                     (map keyword)
                     set)
         associations (->> v
-                          (re-seq #"(?:^| )\$([\w]*)\.(\w+)")
+                          (re-seq #"(?:^|\s|\()\$([\w]*)\.(\w+)")
                           (map rest)
                           (map #(map keyword %))
                           set)]
@@ -31,7 +31,7 @@
                                                                                 agg
                                                                                 v)
                    :default agg)]
-    (println "REFS" key-refs val-refs)
+    ;; (println "REFS" key-refs val-refs)
     (clojure.set/union key-refs val-refs)))
 
 (defn intra-deps
@@ -101,11 +101,13 @@
 
 (defn chan-setup
   [dependencies]
+  (println "DEPS" dependencies)
   (let [sources (->> dependencies
                      (map second)
                      (map :table-dep)
                      (map :source)
                      (apply clojure.set/union))
+        _ (println "ALL SOURCES" sources)
         added-src (reduce-kv (fn [m table deps]
                                (if (sources table)
                                  (let [src-chan (chan 100)
@@ -122,6 +124,7 @@
                                                                    added-done-chan
                                                                    (let [src-sub (chan 100)
                                                                          src-mult (-> m source :src-mult)
+                                                                         _ (println "TAP" table source deps)
                                                                          tapped (tap src-mult src-sub)
                                                                          with-source (assoc added-done-chan
                                                                                             :src-sub
@@ -134,5 +137,6 @@
 
 (defn resolve-deps
   [config]
+  (println "MODELS" (keys (:models config)))
   (let [dependencies (reduce-kv table-deps {} (:models config))]
     (chan-setup dependencies)))

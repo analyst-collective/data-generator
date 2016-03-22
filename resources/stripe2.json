@@ -7,114 +7,6 @@
     "port": 5432
   },
   "models": {
-    "stripe_plans": {
-      "model": {
-        "id": {
-          "primarykey": true,
-          "type": "string",
-          "value": {
-            "type": "uuid"
-          }
-        },
-        "amount": {
-          "type": "integer",
-          "master": {
-            "count": 3
-          },
-          "value": {
-            "type": "formula",
-            "properties": {
-              "equation": "2.5 * x ^ 2 + 42.5 * x + 5"
-            }
-          }
-        },
-        "popularity": {
-          "type": "integer",
-          "virtual": true,
-          "value": {
-            "type": "formula",
-            "properties": {
-              "equation": "10 - 3 * x"
-            }
-          }
-        },
-        "interval": {
-          "type": "string",
-          "value": {
-            "type": "case",
-            "check": "$$self.amount < 100",
-            "branches": {
-              "true": {
-                "type": "enum",
-                "weights": {
-                  "monthly": 1
-                }
-              },
-              "false": {
-                "type": "enum",
-                "weights": {
-                  "yearly": 1
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "stripe_customer": {
-      "model": {
-        "id_virtual": {
-          "type": "string",
-          "virtual": true,
-          "value": {
-            "type": "uuid"
-          }
-        },
-        "id": {
-          "primarykey": true,
-          "type": "string",
-          "value": {
-            "type": "concat",
-            "properties": {
-              "values": ["cus_", "$$self.id_virtual"]
-            }
-          }
-        },
-        "decay_virtual": {
-          "type": "double",
-          "virtual": true,
-          "master": {
-            "count": 1000
-          },
-          "value": {
-            "type": "formula",
-            "properties": {
-              "equation": "x / 50"
-            }
-          }
-        },
-        "created": {
-          "type": "integer",
-          "value": {
-            "type": "formula",
-            "properties": {
-              "equation": "1300736695 + 51840 * x * 0.98 ^ $$self.decay_virtual"
-            }
-          }
-        },
-        "churned": {
-          "type": "boolean",
-          "virtual": true,
-          "value": {
-            "type": "enum",
-            "weights": {
-              "true": 3,
-              "false": 97
-            }
-          }
-        }
-      }
-    },
     "stripe_invoices": {
       "model": {
         "id_virtual": {
@@ -139,7 +31,7 @@
           "value": {
             "type": "enum",
             "weights": {
-              "$stripe_subscriptions.plan_total": 1
+              "$stripe_subscriptions.plan_amount": 1
             }
           }
         },
@@ -167,7 +59,7 @@
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "$stripe_subscriptions.start + (y + 1) * $stripe_subscriptions.interval_int"
+              "equation": "$$self.period_start + $stripe_subscriptions.interval_int"
             }
           }
         },
@@ -269,13 +161,13 @@
             }
           }
         },
-        "customer_churned": {
-          "type": "boolean",
+        "customer_churn_date": {
+          "type": "integer",
           "virtual": true,
           "value": {
             "type": "enum",
             "weights": {
-              "$stripe_customer.churned": 1
+              "$stripe_customer.churn_date": 1
             }
           }
         },
@@ -308,13 +200,13 @@
             }
           }
         },
-        "last_subscription": {
-          "type": "boolean",
+        "remaining_life": {
+          "type": "integer",
           "virtual": true,
           "value": {
             "type": "formula",
             "properties": {
-              "equation": "z - y <= 1"
+              "equation": "$stripe_customer.churn_date - $$self.start"
             }
           }
         },
@@ -322,55 +214,28 @@
           "type": "integer",
           "virtual": true,
           "value": {
-            "type": "case",
-            "check": "$$self.last_subscription",
-            "branches": {
-              "false": {
-                "type": "enum",
-                "weights": {
-                  "20": 1
-                }
-              },
-              "true": {
-                "type": "range",
-                "properties": {
-                  "min": 1,
-                  "max": 4
-                }
-              }
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.remaining_life / $$self.interval_int / (z - y)",
+              "randomness": 0.3
             }
           }
         },
         "ended_at": {
-          "type": "biginteger",
+          "type": "integer",
           "value": {
-            "type": "case",
-            "check": "$$self.last_subscription",
-            "branches": {
-              "true": {
-                "type": "case",
-                "check": "$$self.customer_churned",
-                "branches": {
-                  "true": {
-                    "type": "formula",
-                    "properties": {
-                      "equation": "$$self.start + $$self.interval_count * $$self.interval_int"
-                    }
-                  },
-                  "false": {
-                    "type": "enum",
-                    "weights": {
-                      "$$null": 1
-                    }
-                  }
-                }
-              },
-              "false": {
-                "type": "formula",
-                "properties": {
-                  "equation": "$$self.start + $$self.interval_count * $$self.interval_int"
-                }
-              }
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.interval_count * $$self.interval_int + $$self.start"
+            }
+          }
+        },
+        "plan_amount": {
+          "type": "integer",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$stripe_plans.amount": 1
             }
           }
         },
@@ -396,8 +261,190 @@
           }
         }
       }
+    },
+    "stripe_plans": {
+      "model": {
+        "id": {
+          "primarykey": true,
+          "type": "string",
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "amount": {
+          "type": "integer",
+          "master": {
+            "count": 3
+          },
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "(2.5 * x ^ 2 + 42.5 * x + 5) * 100"
+            }
+          }
+        },
+        "popularity": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "10 - 3 * x"
+            }
+          }
+        },
+        "interval": {
+          "type": "string",
+          "value": {
+            "type": "case",
+            "check": "$$self.amount < 6000",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "monthly": 1
+                }
+              },
+              "false": {
+                "type": "enum",
+                "weights": {
+                  "yearly": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stripe_customer_bucket": {
+      "model": {
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "bucket": {
+          "type": "integer",
+          "master": {
+            "count": 60
+          },
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "5 + 1.1 ^ x"
+            }
+          }
+        }
+      }
+    },
+    "stripe_customer": {
+      "model": {
+        "bucket": {
+          "type": "association",
+          "virtual": true,
+          "master": {
+            "model": "stripe_customer_bucket",
+            "quantity": {
+              "type": "formula",
+              "properties": {
+                "equation": "$stripe_customer_bucket.bucket",
+                "randomness": 0.05
+              }
+            }
+          }
+        },
+        "bucket_min_date": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "1300736695 + x * 2629744"
+            }
+          }
+        },
+        "bucket_max_date": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.bucket_min_date + 2629744"
+            }
+          }
+        },
+        "created": {
+          "type": "integer",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": "$$self.bucket_min_date",
+              "max": "$$self.bucket_max_date"
+            }
+          }
+        },
+        "churn_date": {
+          "type": "integer",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.created + $$self.lifetime_bounded"
+            }
+          }
+        },
+        "lifetime": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "distribution",
+            "properties": {
+              "type": "normal-distribution",
+              "args": [63072000, 15768000]
+            }
+          }
+        },
+        "lifetime_bounded": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "case",
+            "check": "$$self.lifetime < 0",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "2635200": 1
+                }
+              },
+              "false": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$$self.lifetime"
+                }
+              }
+            }
+          }
+        },
+        "id_virtual": {
+          "type": "string",
+          "virtual": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "id": {
+          "primarykey": true,
+          "type": "string",
+          "value": {
+            "type": "concat",
+            "properties": {
+              "values": ["cus_", "$$self.id_virtual"]
+            }
+          }
+        }
+      }
     }
   }
 }
-
-
