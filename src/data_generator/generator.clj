@@ -126,7 +126,10 @@
         (close! insert-ch))
       (let [quantity-fn (-> config :models table :quantity-fn)
             ;; probability-fn (-> config :models table :probability-fn)
-            quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration) :this :quantity)]
+            quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration)
+                         :this
+                         :quantity)
+            rounded  (Math/round (double quantity))]
         #_(doseq [n (range quantity)]
           (let [fn-list (-> config :models table :fn-list)
                 data (-> config :models table)
@@ -141,8 +144,8 @@
                                            {src-table src-item}
                                            insert-ch
                                            src-pub
-                                           {:iteration iteration :quantity quantity}
-                                           (range quantity))
+                                           {:iteration iteration :quantity rounded}
+                                           (range rounded))
         (recur config dependencies table src-table src-ch insert-ch)))))
 
 (defn generate-model

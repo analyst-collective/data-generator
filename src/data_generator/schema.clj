@@ -27,15 +27,6 @@
                              data)])
                    models)))
 
-(defn filter-virtual
-  [models]
-  (apply sorted-map (mapcat
-                   (fn [[table data]]
-                     (->> data
-                          (remove (fn [[_ fdata]] (:virtual fdata)))
-                          (conj [table])))
-                   models)))
-
 (defn just-models
   [config]
   (apply sorted-map (mapcat

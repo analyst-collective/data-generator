@@ -22,7 +22,6 @@
 
 (defn filter->where-criteria
   [[a op b]]
-  ;; (println "RECIEVED" a op b)
   (list op a b))
 
 (defn query-filtered
@@ -303,7 +302,7 @@
                                                                             (+' minimum)))
                                                  :models model}))
       (#{:integer :serial} type-norm) (fn gf_range [mkey this model & more]
-                                        ;; (println mkey value)
+                                        ;; (println "RANGE TEST" mkey this model maximum minimum)
                                         (let [maximum (resolve-references maximum this model)
                                               minimum (resolve-references minimum this model)
                                               diff (-' maximum minimum)]
@@ -538,7 +537,7 @@
 (defn generators
   [config dependencies]
   (let [models (:models config)
-        _ (println models)
+        ;; _ (println models)
         new-models (reduce-kv (fn [m table data]
                                 (let [fn-list (build-model-generator config table data dependencies)
                                       added-association-data (association-data data)
