@@ -26,7 +26,7 @@
                 (range n))))
 
 (defn insert
-  [config table model iteration out-chan]
+  [config table model orig-model iteration out-chan]
   (let [db-spec (:database config)
         insert-statement (sql/sql (sql/insert pg table []
                                        (sql/values [model])))
@@ -37,7 +37,9 @@
                                          (throw e))))]
     ;; (println "ROW" row)
     (when out-chan
-      (>!! out-chan {:src-item row :iteration iteration}))))
+      (>!! out-chan {:src-item #_row (merge row orig-model) ;; Merge puts dates back into long format
+                                                            ;; but keeps autoincrents from db
+                     :iteration iteration}))))
 
 (defn run-fns
   ([config fn-coll model context]
@@ -80,9 +82,7 @@
       (let [item (run-fns config fn-list {} {:iteration iteration})
             skip? (->> item vals (some #{:none}))] ;; Select association returned nothing
         (when-not skip?
-          (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub))
-          ;; (insert config table (coerce-dates item data) src-pub)
-          )
+          (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub)))
         (recur config dependencies table (rest iterations) insert-ch)))))
 
 (defn signal-model-complete
@@ -111,33 +111,22 @@
           skip? (->> item vals (some #{:none}))]
       (when-not (or skip? (not create?))
         (let [iteration (:iteration new-context)]
-          (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub))))
+          (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub))))
       (recur config table src-item new-models insert-ch src-pub new-context (rest seq-range)))))
 
 (defn generate-model-from-source*
   [config dependencies table src-table src-ch insert-ch]
   (let [{:keys [src-item iteration]} (<!! src-ch)
         src-pub (-> dependencies table :src-pub)]
-    ;; (println table "GOT" src-item)
-    ;; (println table src-table src-item)
     (if-not src-item
       (do
         (println table "recieved a nil! Closing insert channel")
         (close! insert-ch))
       (let [quantity-fn (-> config :models table :quantity-fn)
-            ;; probability-fn (-> config :models table :probability-fn)
             quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration)
                          :this
                          :quantity)
             rounded  (Math/round (double quantity))]
-        #_(doseq [n (range quantity)]
-          (let [fn-list (-> config :models table :fn-list)
-                data (-> config :models table)
-                item (run-fns config fn-list {src-table src-item} {:iteration iteration :sequence n})
-                create? (-> (probability-fn :create? {} src-item :iteration iteration) :this :create?)
-                skip? (->> item vals (some #{:none}))] ; Field failed to generate association
-            (when-not (or skip? (not create?))
-              (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub)))))
         (generate-model-from-source-helper config
                                            table
                                            src-item

@@ -1,6 +1,7 @@
 (ns data-generator.generator-factory
   (:require [clj-time.coerce :as c]
             [clojure.string :as s]
+            [clojure.edn :as edn]
             [taoensso.timbre :as timbre :refer [info warn error]]
             [clojure.java.jdbc :as j]
             [sqlingvo.core :as sql]
@@ -119,20 +120,26 @@
   
   JSON requires string keys. JSON parsing turns string keys into keywords.
   Coercion of values into the final type is required"
-  [value type]
-  (if (nil? value)
-    value
-    (let [str-value (if (keyword? value)
-                      (name value)
-                      (str value))]
-      (cond
-        (#{:integer :serial} type) (Integer/parseInt str-value)
-        (#{:bigserial :bigint} type) (bigint str-value)
-        (#{:boolean} type) (Boolean/valueOf str-value)
-        (#{:real} type) ((Float/parseFloat str-value))
-        (#{:double} type) (Double/parseDouble str-value)
-        (#{:date :datetime :timestamp-with-time-zone} type) (c/from-long (Integer/parseInt value))
-        (#{:text} type) str-value))))
+  [value ftype]
+  (try (if (nil? value)
+         value
+         (let [str-value (if (keyword? value)
+                           (name value)
+                           (str value))]
+           (if (#{:text} ftype) ;; edn/read-string errors on strings that start with a digit
+             str-value
+             (let [read-value (edn/read-string str-value)]
+               (cond
+                 (#{:integer :serial} ftype) (int read-value)
+                 (#{:bigserial :bigint} ftype) (bigint read-value)
+                 (#{:boolean} ftype) (if read-value
+                                       true
+                                       false)
+                 (#{:real} ftype) (float read-value)
+                 (#{:double} ftype) (double read-value)
+                 (#{:date :datetime :timestamp-with-time-zone} ftype) (c/from-long (long read-value)))))))
+       (catch Exception e (do (println "COERCE ERROR" value (class value) ftype)
+                              (throw e)))))
 
 (defn resolve-references
   [raw this models]
@@ -307,7 +314,7 @@
                                               minimum (resolve-references minimum this model)
                                               diff (-' maximum minimum)]
                                           {:this (assoc this mkey (-> diff rand int (+ minimum)))
-                                           :models model}))
+                                           :models model})) 
       (#{:real} type-norm) (fn gf_range [mkey this model & more]
                              ;; (println mkey value)
                              (let [maximum (resolve-references maximum this model)
@@ -321,7 +328,13 @@
                                      minimum (resolve-references minimum this model)
                                      diff (-' maximum minimum)]
                                  {:this (assoc this mkey (-> diff rand (+ minimum)))
-                                  :models model})))))
+                                  :models model}))
+      (#{:timestamp-with-time-zone} type-norm) (fn gf_range [mkey this model & more]
+                                                 (let [maximum (resolve-references maximum this model)
+                                                       minimum (resolve-references minimum this model)
+                                                       diff (-' maximum minimum)]
+                                                   {:this (assoc this mkey (-> diff rand long (+ minimum)))
+                                                    :models model})))))
 
 (defmethod field-data* "faker"
   [value type-norm]

@@ -1,0 +1,195 @@
+{
+  "database": {
+    "user": "samprotas",
+    "dbtype": "postgresql",
+    "dbname": "data_generator",
+    "host": "localhost",
+    "port": 5432
+  },
+  "models": {
+    "mailchimp_lists": {
+      "model": {
+        "id": {
+          "type": "string",
+          "primarykey": true,
+          "master": {
+            "count": 2
+          },
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "name": {
+          "type": "string",
+          "value": {
+            "type": "case",
+            "check": "x",
+            "branches": {
+              "0.0": {
+                "type": "enum",
+                "weights": {
+                  "Prospects": 1
+                }
+              },
+              "1.0": {
+                "type": "enum",
+                "weights": {
+                  "Users": 1
+                }
+              }
+            }
+          }
+        },
+        "growth_rate": {
+          "type": "float",
+          "virtual": true,
+          "value": {
+            "type": "case",
+            "check": "$$self.name",
+            "branches": {
+              "Prospects": {
+                "type": "enum",
+                "weights": {
+                  "1.1": 1
+                }
+              },
+              "Users": {
+                "type": "enum",
+                "weights": {
+                  "1.05": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mailchimp_member_buckets": {
+      "model": {
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "list": {
+          "type": "association",
+          "master": {
+            "model": "mailchimp_lists",
+            "quantity": {
+              "type": "enum",
+              "weights": {
+                "60": 1
+              }
+            }
+          }
+        },
+        "created_at": {
+          "type": "datetime",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "1300816496000 + 2628000000 * y"
+            }
+          }
+        },
+        "bucket_max": {
+          "type": "datetime",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.created_at + 2628000000"
+            }
+          }
+        },
+        "size": {
+          "type": "integer",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "5 * $mailchimp_lists.growth_rate ^ y"
+            }
+          }
+        }
+      }
+    },
+    "mailchimp_campaigns": {
+      "model": {
+        "id": {
+          "type": "string",
+          "primarykey": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "list_bucket": {
+          "type": "association",
+          "virtual": true,
+          "master": {
+            "model": "mailchimp_member_buckets"
+          }
+        },
+        "recipients__list_id": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_member_buckets.list": 1
+            }
+          }
+        }
+      }
+    },
+    "mailchimp_members": {
+      "model": {
+        "bucket": {
+          "type": "association",
+          "virtual": true,
+          "master": {
+            "model": "mailchimp_member_buckets",
+            "quantity": {
+              "type": "enum",
+              "weights": {
+                "$mailchimp_member_buckets.size": 1
+              }
+            }
+          }
+        },
+        "id": {
+          "type": "string",
+          "primarykey": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "email_address": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "internet.email"
+          }
+        },
+        "timestamp_signup": {
+          "type": "datetime",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": "$mailchimp_member_buckets.created_at",
+              "max": "$mailchimp_member_buckets.bucket_max"
+            }
+          }
+        },
+        "list_id": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_member_buckets.list": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
