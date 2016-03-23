@@ -548,7 +548,8 @@
   [foreach]
   (let [table (-> foreach :model keyword)
         filter-criteria (:filter foreach)
-        filter-split (s/split #"\s+" filter-criteria)
+        _ (println "FOREACHFILTER" filter-criteria foreach)
+        filter-split (s/split filter-criteria #"\s+")
         filter-prepped (when filter-split
                          (reduce (fn [agg value]
                                    (let [pattern (re-pattern
@@ -562,10 +563,12 @@
                                                        (-> match
                                                            (s/split #"\.")
                                                            last
-                                                           keyword))]
+                                                           keyword))
+                                         ;; _ (println "PREP CHECK" filter-split value pattern replacement)
+                                         ]
                                      (if replacement
                                        (conj agg replacement)
-                                       (conj value replacement))))
+                                       (conj agg value))))
                                  []
                                  filter-split))
         filter-field (when filter-prepped
@@ -605,7 +608,7 @@
                                          [foreach]
                                          foreach))
                          foreach-keys (map #(-> % :model keyword) foreach-arr)
-                         foreach-fns (map foreach-fn-generator foreach)
+                         foreach-fns (map foreach-fn-generator foreach-arr)
                          quantity (-> fdata :master :quantity)
                          quantity-fn (if quantity
                                        (field-data* quantity :integer)

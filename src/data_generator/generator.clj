@@ -157,7 +157,19 @@
         inserting-done-ch (launch-inserters insert-ch 10)
         done-ch (-> dependencies table :done-chan)
         src-sub (-> dependencies table :src-sub)
-        src-pub (-> dependencies table :src-pub)]
+        src-pub (-> dependencies table :src-pub)
+        dependency-chans (->> dependencies table  :table-dep :select (map #(-> dependencies
+                                                                               %
+                                                                               :done-chan)))
+        _ (println "DEP CHANS" dependency-chans)
+        start-chan (try (if (seq dependency-chans)
+                          (a/merge dependency-chans 100) ;; Add buffer so models can close for sure 
+                          (let [dummy-chan (chan)]
+                            (close! dummy-chan) ;; Pre-close dummy chan so model starts immediately
+                            dummy-chan))
+                        (catch Exception e (do (println "DEPCHAN ERROR" dependency-chans)
+                                               (throw e))))]
+    (<!! start-chan) ;; Block until all dependent tables are done
     (if src-sub
       (let [src-table (-> dependencies table :table-dep :source first)]
         (println "Launching" table "with channel source")
@@ -187,6 +199,7 @@
 
 (defn generate
   [config dependencies]
+  (println "GENERATENOW" config)
   (let [model-done-chans (map (fn [[table _]]
                                 (thread (generate-model config dependencies table)))
                               (:models config))
