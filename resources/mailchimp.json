@@ -190,6 +190,45 @@
           }
         }
       }
+    },
+    "mailchimp_emails": {
+      "model": {
+        "id": {
+          "type": "string",
+          "primarykey": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "campaign": {
+          "type": "association",
+          "master": {
+            "model": "mailchimp_campaigns",
+            "foreach": {
+              "model": "mailchimp_members",
+              "filter": "$mailchimp_campaigns.recipients__list_id = $mailchimp_members.list_id"
+            }
+          }
+        },
+        "member": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_members.id": 1
+            }
+          }
+        },
+        "member_email_address": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_members.email_address": 1
+            }
+          }
+        }
+      }
     }
   }
 }

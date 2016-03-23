@@ -53,7 +53,19 @@
   (if-not (= "association" (:type fdata))
     agg
     (cond
-      (:master fdata) (update agg :source #(conj % (-> fdata :master :model keyword)))
+      (:master fdata) (let [with-master (update agg :source #(conj % (-> fdata :master :model keyword)))
+                            foreach (-> fdata :master :foreach)
+                            foreach-models (when foreach
+                                             (if (instance? clojure.lang.IPersistentMap foreach)
+                                               #{(-> foreach :model keyword)}
+                                               (reduce (fn [models fmap]
+                                                         (conj models (-> fmap :model :keyword)))
+                                                       #{}
+                                                       foreach)))]
+                        (if-not foreach
+                          with-master
+                          ;; (update with-master :select #(conj % (-> foreach :model keyword)))
+                          (update with-master :select #(clojure.set/union % foreach-models))))
       :select (update agg :select #(conj % (-> fdata :value :model keyword))))))
 
 (defn table-deps

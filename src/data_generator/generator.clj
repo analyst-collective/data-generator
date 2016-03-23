@@ -10,6 +10,20 @@
 (def pg (postgresql))
 (def lite (sqlite))
 
+(defn permutate
+  ([coll-of-colls]
+   (permutate (rest coll-of-colls) (first coll-of-colls) []))
+  ([rem-colls this-coll agg]
+   (let [next-coll (first rem-colls)
+         this-item (first this-coll)]
+     (when this-item
+       (if next-coll
+         (do (permutate (rest rem-colls) next-coll (conj agg this-item))
+             (permutate rem-colls (rest this-coll) agg))
+         (do
+           (println (conj agg this-item))
+           (recur rem-colls (rest this-coll) agg)))))))
+
 (defn inserter
   [insert-ch]
   (let [function (<!! insert-ch)]
@@ -156,6 +170,7 @@
                                   m))
                               {}
                               (-> config :models table :model))
+            _ (println "GM" table (:count master))
             iterations (range (:count master))]
         (println "Launching" table "with iteration. Count:" (:count master))
         (generate-model* config dependencies table iterations insert-ch)

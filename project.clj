@@ -13,7 +13,8 @@
                  [faker "0.2.2"]
                  [incanter "1.5.7"]
                  [org.clojure/core.async "0.2.374"]
-                 [com.taoensso/timbre "4.3.1"]]
+                 [com.taoensso/timbre "4.3.1"]
+                 [org.clojure/math.combinatorics "0.1.1"]]
   :main ^:skip-aot data-generator.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})
