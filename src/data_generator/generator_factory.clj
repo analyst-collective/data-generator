@@ -207,6 +207,10 @@
       (Double/parseDouble number)
       (symbol string))))
 
+(defn remove-comparitor
+  [[a comparitor b]]
+  [a b])
+
 (defn calculate-formula
   [equation this model more]
   (if-not (instance? java.lang.String equation)
@@ -548,13 +552,12 @@
   [foreach]
   (let [table (-> foreach :model keyword)
         filter-criteria (:filter foreach)
-        _ (println "FOREACHFILTER" filter-criteria foreach)
         filter-split (s/split filter-criteria #"\s+")
         filter-prepped (when filter-split
                          (reduce (fn [agg value]
                                    (let [pattern (re-pattern
                                                   (str "(?:^|\\s|\\()(\\$"
-                                                       table
+                                                       (name table)
                                                        "\\.[\\w]+)"))
                                          match (->> value
                                                     (re-find pattern)
@@ -564,15 +567,16 @@
                                                            (s/split #"\.")
                                                            last
                                                            keyword))
-                                         ;; _ (println "PREP CHECK" filter-split value pattern replacement)
-                                         ]
+                                         _ (println "FOREACH MID " value pattern match replacement)]
                                      (if replacement
                                        (conj agg replacement)
                                        (conj agg value))))
                                  []
                                  filter-split))
+        
         filter-field (when filter-prepped
-                       (some #(and (keyword? %) %) filter-prepped))]
+                       (some #(and (keyword? %) %) filter-prepped))
+        _ (println "FOREACH INFO " filter-criteria filter-prepped filter-field)]
     (if-not filter-criteria
       (fn foreach-all-fn
         [mkey this models & more]
@@ -584,13 +588,23 @@
         [mkey this models & more]
         (let [other (apply hash-map more)
               database (-> other :config :database)
+              _ (println "FILTER FIELD" filter-field table)
               filter-type (-> other :config :models table :model filter-field :type-norm)
               resolved-where (map #(resolve-references % this models) filter-prepped)
-              primitives-where (map str->primitive resolved-where)
-              resolved-value (some #(and (number? %) %) primitives-where)
-              normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
-                                        primitives-where)
+              no-operator (remove-comparitor resolved-where)
+              resolved-value (some #(and (not (keyword? %)) %) no-operator)
+              coerced-value (coerce resolved-value filter-type)
+              ;; primitives-where (map str->primitive resolved-where)
+              ;; resolved-value (some #(and (number? %) %) primitives-where)
+              ;; normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
+                                        ;; primitives-where)
+              operator-value (second resolved-where)
+              normalized-where (into [] (replace {resolved-value coerced-value
+                                                  operator-value (symbol operator-value)}
+                                                 resolved-where))
+              _ (println "NORMALIZED " normalized-where)
               query-statement (query-all-filtered table normalized-where)]
+          (println "FOREACH QUERY " query-statement)
           (j/query database query-statement))))))
 
 (defn association-data
@@ -627,7 +641,8 @@
                                          probability-fn
                                          :foreach-keys
                                          foreach-keys
-                                         :foreach-fns foreach-fns)]
+                                         :foreach-fns
+                                         foreach-fns)]
                      with-fns))))
              data
              (:model data)))

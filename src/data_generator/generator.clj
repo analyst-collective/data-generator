@@ -5,6 +5,7 @@
             [clj-time.coerce :refer [from-long to-sql-time]]
             [incanter.distributions :as id] ;; functions are resovled in this namespace
             [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
+            [clojure.math.combinatorics :as combo]
             [clojure.core.async :as a :refer [<!! <! >!! >! chan close! thread]]))
 
 (def pg (postgresql))
@@ -113,7 +114,7 @@
       (recur table listen-ch signal-ch pub-ch))))
 
 (defn generate-model-from-source-helper
-  [config table src-item models insert-ch src-pub context seq-range]
+  [config table models insert-ch src-pub context seq-range]
   (if-let [n (first seq-range)]
     (let [fn-list (-> config :models table :fn-list)
           data (-> config :models table)
@@ -126,7 +127,40 @@
       (when-not (or skip? (not create?))
         (let [iteration (:iteration new-context)]
           (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub))))
-      (recur config table src-item new-models insert-ch src-pub new-context (rest seq-range)))))
+      (recur config table new-models insert-ch src-pub new-context (rest seq-range)))))
+
+(defn calculate-quantity
+  [config table models context]
+  (let [quantity-fn (-> config :models table :quantity-fn)
+        quantity (-> (quantity-fn :quantity {} models :iteration (:iteration context))
+                     :this
+                     :quantity)
+        rounded  (Math/round (double quantity))]
+    rounded))
+
+(defn generate-model-from-source-permutation
+  [config table models iteration insert-ch src-pub permutations]
+  (when-let [permutation (first permutations)]
+    (let [foreach-keys (-> config :models table :foreach-keys)
+          foreach-zipped (zipmap foreach-keys permutation)
+          ;; models (assoc foreach-zipped src-table src-item)
+          new-models (merge foreach-zipped models)
+          quantity (calculate-quantity config table models {:iteration iteration})
+          ;; quantity-fn (-> config :models table :quantity-fn)
+          ;; quantity (-> (quantity-fn :quantity {} models :iteration iteration)
+                       ;; :this
+                       ;; :quantity)
+          ;; rounded  (Math/round (double quantity))
+          ]
+      (generate-model-from-source-helper config
+                                         table
+                                         ;; src-item
+                                         new-models
+                                         insert-ch
+                                         src-pub
+                                         {:iteration iteration :quantity quantity}
+                                         (range quantity))
+      (recur config table models iteration insert-ch src-pub (rest permutations)))))
 
 (defn generate-model-from-source*
   [config dependencies table src-table src-ch insert-ch]
@@ -136,19 +170,30 @@
       (do
         (println table "recieved a nil! Closing insert channel")
         (close! insert-ch))
-      (let [quantity-fn (-> config :models table :quantity-fn)
-            quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration)
-                         :this
-                         :quantity)
-            rounded  (Math/round (double quantity))]
-        (generate-model-from-source-helper config
-                                           table
-                                           src-item
-                                           {src-table src-item}
-                                           insert-ch
-                                           src-pub
-                                           {:iteration iteration :quantity rounded}
-                                           (range rounded))
+      (let [foreach-fns (-> config :models table :foreach-fns)]
+        (if (seq foreach-fns)
+          (let [foreach-fns-evaluated (map #(% :dummy-key
+                                               {}
+                                               {src-table src-item}
+                                               :iteration iteration
+                                               :config config)
+                                             foreach-fns)
+                permutations (apply combo/cartesian-product foreach-fns-evaluated)]
+            (generate-model-from-source-permutation config
+                                                    table
+                                                    {src-table src-item}
+                                                    iteration
+                                                    insert-ch
+                                                    src-pub
+                                                    permutations))
+          (let [quantity (calculate-quantity config table {src-table src-item} {:iteration iteration})]
+            (generate-model-from-source-helper config
+                                               table
+                                               {src-table src-item}
+                                               insert-ch
+                                               src-pub
+                                               {:iteration iteration :quantity quantity #_rounded}
+                                               (range quantity #_rounded))))
         (recur config dependencies table src-table src-ch insert-ch)))))
 
 (defn generate-model
