@@ -166,6 +166,13 @@
        (catch Exception e (do (println "COERCE ERROR" value (class value) ftype)
                               (throw e)))))
 
+(defn coerce-sql
+  [value ftype]
+  (let [coerced (coerce value ftype)]
+    (if (and coerced (#{:date :datetime :timestamp-with-time-zone} ftype)) ;; Truth test for nil time
+      (c/to-sql-time coerced)
+      coerced)))
+
 (defn resolve-references
   [raw this models]
   ;; (println raw this models)
@@ -362,6 +369,7 @@
                                                  (let [maximum (resolve-references maximum this model)
                                                        minimum (resolve-references minimum this model)
                                                        diff (-' maximum minimum)]
+                                                   ;; (println "timestamp range" minimum maximum)
                                                    {:this (assoc this mkey (-> diff rand long (+ minimum)))
                                                     :models model})))))
 
@@ -548,35 +556,78 @@
                                                     (:key new-item)))]
        (recur config table new-mdata new-deps new-fn-list)))))
 
+(defn split-filter
+  [filter-string]
+  (when filter-string
+    (let [filter-criteria-or-split (s/split filter-string #"\s+\|\|\s+")
+          filter-criteria-and-split (map #(s/split % #"\s+&&\s+") filter-criteria-or-split)
+          filter-split (map (fn [and-vectors]
+                              (map #(s/split % #"\s+") and-vectors))
+                            filter-criteria-and-split)]
+      filter-split)))
+
+(defn prep-filter-seq
+  [filter-seq table]
+  (reduce (fn [agg value]
+            (let [pattern (re-pattern
+                           (str "(?:^|\\s|\\()(\\$"
+                                (name table)
+                                "\\.[\\w]+)"))
+                  match (->> value
+                             (re-find pattern)
+                             last)
+                  replacement (when match
+                                (-> match
+                                    (s/split #"\.")
+                                    last
+                                    keyword))]
+              (if replacement
+                (conj agg replacement)
+                (conj agg value))))
+          []
+          filter-seq))
+
+(defn prep-filter
+  [split-filter table]
+  (map (fn [and-vectors]
+         (map #(prep-filter-seq % table) and-vectors))
+       split-filter))
+
 (defn foreach-fn-generator
   [foreach]
   (let [table (-> foreach :model keyword)
         filter-criteria (:filter foreach)
-        filter-split (s/split filter-criteria #"\s+")
-        filter-prepped (when filter-split
-                         (reduce (fn [agg value]
-                                   (let [pattern (re-pattern
-                                                  (str "(?:^|\\s|\\()(\\$"
-                                                       (name table)
-                                                       "\\.[\\w]+)"))
-                                         match (->> value
-                                                    (re-find pattern)
-                                                    last)
-                                         replacement (when match
-                                                       (-> match
-                                                           (s/split #"\.")
-                                                           last
-                                                           keyword))
-                                         _ (println "FOREACH MID " value pattern match replacement)]
-                                     (if replacement
-                                       (conj agg replacement)
-                                       (conj agg value))))
-                                 []
-                                 filter-split))
         
-        filter-field (when filter-prepped
-                       (some #(and (keyword? %) %) filter-prepped))
-        _ (println "FOREACH INFO " filter-criteria filter-prepped filter-field)]
+        ;; filter-split (map #(map #(s/split ) %) filter-criteria-and-split)
+        ;; filter-split (s/split filter-criteria #"\s+")
+        filter-split (split-filter filter-criteria)
+        filter-prepped (prep-filter filter-split table)
+        ;; filter-prepped (when filter-split
+        ;;                  (reduce (fn [agg value]
+        ;;                            (let [pattern (re-pattern
+        ;;                                           (str "(?:^|\\s|\\()(\\$"
+        ;;                                                (name table)
+        ;;                                                "\\.[\\w]+)"))
+        ;;                                  match (->> value
+        ;;                                             (re-find pattern)
+        ;;                                             last)
+        ;;                                  replacement (when match
+        ;;                                                (-> match
+        ;;                                                    (s/split #"\.")
+        ;;                                                    last
+        ;;                                                    keyword))
+        ;;                                  _ (println "FOREACH MID " value pattern match replacement)]
+        ;;                              (if replacement
+        ;;                                (conj agg replacement)
+        ;;                                (conj agg value))))
+        ;;                          []
+        ;;                          filter-split))
+        
+        ;; filter-field (when filter-prepped
+        ;;                (some #(and (keyword? %) %) filter-prepped))
+        filter-fields (filter keyword? (flatten filter-prepped))
+        ;; _ (println "FOREACH INFO " filter-criteria filter-prepped filter-field)
+        ]
     (if-not filter-criteria
       (fn foreach-all-fn
         [mkey this models & more]
@@ -588,22 +639,36 @@
         [mkey this models & more]
         (let [other (apply hash-map more)
               database (-> other :config :database)
-              _ (println "FILTER FIELD" filter-field table)
-              filter-type (-> other :config :models table :model filter-field :type-norm)
-              resolved-where (map #(resolve-references % this models) filter-prepped)
-              no-operator (remove-comparitor resolved-where)
-              resolved-value (some #(and (not (keyword? %)) %) no-operator)
-              coerced-value (coerce resolved-value filter-type)
-              ;; primitives-where (map str->primitive resolved-where)
-              ;; resolved-value (some #(and (number? %) %) primitives-where)
-              ;; normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
-                                        ;; primitives-where)
-              operator-value (second resolved-where)
-              normalized-where (into [] (replace {resolved-value coerced-value
-                                                  operator-value (symbol operator-value)}
-                                                 resolved-where))
-              _ (println "NORMALIZED " normalized-where)
-              query-statement (query-all-filtered table normalized-where)]
+              filter-types (map #(-> other :config :models table :model % :type-norm) filter-fields)
+              type-map (zipmap filter-fields filter-types)
+              resolved-where (clojure.walk/prewalk #(resolve-references % this models) filter-prepped)
+              normalized-where (map (fn [and-vectors]
+                                   (map (fn [filter-seq]
+                                          (let [no-operator (remove-comparitor filter-seq)
+                                                resolved-value (first (filter (complement keyword?)
+                                                                              no-operator))
+                                                filter-field (first (filter keyword?
+                                                                            no-operator))
+                                                filter-type (filter-field type-map)
+                                                coerced-value (coerce-sql resolved-value filter-type)
+                                                operator-value (second filter-seq)
+                                                normalized-seq (into []
+                                                                     (replace
+                                                                      {resolved-value coerced-value
+                                                                       operator-value (symbol operator-value)}
+                                                                      filter-seq))]
+                                            (filter->where-criteria (reverse (into (list) normalized-seq)))))
+                                        and-vectors))
+                                 resolved-where)
+              constructed-ands (map (fn [and-vectors]
+                                      (if (< 1 (count and-vectors))
+                                        (list* 'and and-vectors)
+                                        (first and-vectors)))
+                                    normalized-where)
+              constructed-where (if (< 1 (count constructed-ands))
+                                  (list * 'or constructed-ands)
+                                  (first constructed-ands))
+              query-statement (query-all-filtered table constructed-where)]
           (println "FOREACH QUERY " query-statement)
           (j/query database query-statement))))))
 

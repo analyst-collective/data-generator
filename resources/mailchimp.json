@@ -80,7 +80,7 @@
             "quantity": {
               "type": "enum",
               "weights": {
-                "60": 1
+                "12": 1
               }
             }
           }
@@ -136,6 +136,16 @@
             "type": "enum",
             "weights": {
               "$mailchimp_member_buckets.list": 1
+            }
+          }
+        },
+        "send_time": {
+          "type": "datetime",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": "$mailchimp_member_buckets.created_at",
+              "max": "$mailchimp_member_buckets.bucket_max"
             }
           }
         }
@@ -206,7 +216,7 @@
             "model": "mailchimp_campaigns",
             "foreach": {
               "model": "mailchimp_members",
-              "filter": "$mailchimp_campaigns.recipients__list_id = $mailchimp_members.list_id"
+              "filter": "$mailchimp_campaigns.recipients__list_id = $mailchimp_members.list_id && $mailchimp_members.timestamp_signup < $mailchimp_campaigns.send_time"
             }
           }
         },
