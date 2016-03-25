@@ -148,6 +148,26 @@
               "max": "$mailchimp_member_buckets.bucket_max"
             }
           }
+        },
+        "open_effectiveness": {
+          "type": "real",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0.25,
+              "max": 0.45
+            }
+          }
+        },
+        "click_effectiveness": {
+          "type": "real",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0.02,
+              "max": 0.07
+            }
+          }
         }
       }
     },
@@ -201,16 +221,9 @@
         }
       }
     },
-    "mailchimp_emails": {
+    "mailchimp_sent_to": {
       "model": {
-        "id": {
-          "type": "string",
-          "primarykey": true,
-          "value": {
-            "type": "uuid"
-          }
-        },
-        "campaign": {
+        "campaign_id": {
           "type": "association",
           "master": {
             "model": "mailchimp_campaigns",
@@ -220,7 +233,15 @@
             }
           }
         },
-        "member": {
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "virtual": true,
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "email_id": {
           "type": "string",
           "value": {
             "type": "enum",
@@ -229,7 +250,7 @@
             }
           }
         },
-        "member_email_address": {
+        "email_address": {
           "type": "string",
           "value": {
             "type": "enum",
@@ -237,8 +258,390 @@
               "$mailchimp_members.email_address": 1
             }
           }
+        },
+        "send_time": {
+          "type": "datetime",
+          "virtual": true,
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_campaigns.send_time": 1
+            }
+          }
+        },
+        "member_age_days": {
+          "type": "real",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "($mailchimp_campaigns.send_time - $mailchimp_members.timestamp_signup) / 86400000"
+            }
+          }
+        },
+        "age_open_offset": {
+          "type": "real",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.member_age_days * 0.05 / 365"
+            }
+          }
+        },
+        "age_click_offset": {
+          "type": "real",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.member_age_days * 0.0025 / 365"
+            }
+          }
+        },
+        "open_probability": {
+          "type": "real",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$mailchimp_campaigns.open_effectiveness - $$self.age_open_offset"
+            }
+          }
+        },
+        "click_probability": {
+          "type": "real",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$mailchimp_campaigns.click_effectiveness - $$self.age_click_offset"
+            }
+          }
+        },
+        "roll": {
+          "type": "real",
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0,
+              "max": 1
+            }
+          }
+        },
+        "result": {
+          "type": "integer",
+          "value": {
+            "type": "case",
+            "check": "$$self.roll < $$self.click_probability",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "2": 1
+                }
+              },
+              "false": {
+                "type": "case",
+                "check": "$$self.roll < $$self.open_probability",
+                "branches": {
+                  "true": {
+                    "type": "enum",
+                    "weights": {
+                      "1": 1
+                    }
+                  },
+                  "false": {
+                    "type": "enum",
+                    "weights": {
+                      "0": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "list_id": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_members.list_id": 1
+            }
+          }
+        },
+        "status": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "sent": 97,
+              "soft": 2,
+              "hard": 1
+            }
+          }
+        }
+      }
+     },
+    "mailchimp_email_activity": {
+      "model": {
+        "id_assoc": {
+            "type": "association",
+            "virtual": true,
+            "master": {
+              "model": "mailchimp_sent_to",
+              "quantity": {
+                "type": "case",
+                "check": "$mailchimp_sent_to.status",
+                "branches": {
+                  "hard": {
+                    "type": "enum",
+                    "weights": {
+                      "1": 1
+                    }
+                  },
+                  "soft": {
+                    "type": "enum",
+                    "weights": {
+                      "1": 1
+                    }
+                  },
+                  "sent": {
+                    "type": "case",
+                    "check": "$mailchimp_sent_to.result > 0",
+                    "branches": {
+                      "true": {
+                        "type": "enum",
+                        "weights": {
+                          "1": 1
+                        }
+                      },
+                      "false": {
+                        "type": "enum",
+                        "weights": {
+                          "0": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "id": {
+            "type": "integer",
+            "primarykey": true,
+            "virtual": true,
+            "value": {
+              "type": "autoincrement"
+            }
+          },
+          "campaign_id": {
+            "type": "string",
+            "value": {
+              "type": "enum",
+              "weights": {
+                "$mailchimp_sent_to.campaign_id": 1
+              }
+            }
+          },
+          "email_id": {
+            "type": "string",
+            "value": {
+              "type": "enum",
+              "weights": {
+                "$mailchimp_sent_to.email_id": 1
+              }
+            }
+          },
+          "list_id": {
+            "type": "string",
+            "value": {
+              "type": "enum",
+              "weights": {
+                "$mailchimp_sent_to.list_id": 1
+              }
+            }
+          },
+          "email_address": {
+            "type": "string",
+            "value": {
+              "type": "enum",
+              "weights": {
+                "$mailchimp_sent_to.email_address": 1
+              }
+            }
+          },
+        "send_time": {
+          "type": "datetime",
+          "virtual": true,
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_sent_to.send_time": 1
+            }
+          }
+        },
+        "sub_activity_quantity": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_sent_to.result": 1
+            }
+          }
+        },
+        "status": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_sent_to.status": 1
+            }
+          }
+        }
+      }
+    },
+    "mailchimp_email_activity__activity": {
+      "model": {
+        "id_assoc": {
+          "type": "association",
+          "virtual": true,
+          "master": {
+            "model": "mailchimp_email_activity",
+            "quantity": {
+              "type": "case",
+              "check": "$mailchimp_email_activity.status",
+              "branches": {
+                "sent": {
+                  "type": "enum",
+                  "weights": {
+                    "$mailchimp_email_activity.sub_activity_quantity": 1
+                  }
+                },
+                "hard": {
+                  "type": "enum",
+                  "weights": {
+                    "1": 1
+                  }
+                },
+                "soft": {
+                  "type": "enum",
+                  "weights": {
+                    "1": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "virtual": true,
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "campaign_id": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_email_activity.campaign_id": 1
+            }
+          }
+        },
+        "email_id": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_email_activity.email_id": 1
+            }
+          }
+        },
+        "action": {
+          "type": "string",
+          "value": {
+            "type": "case",
+            "check": "y == 0",
+            "branches": {
+              "false": {
+                "type": "enum",
+                "weights": {
+                  "click": 1
+                }
+              },
+              "true": {
+                "type": "case",
+                "check": "$mailchimp_email_activity.status",
+                "branches": {
+                  "sent": {
+                    "type": "enum",
+                    "weights": {
+                      "open": 1
+                    }
+                  },
+                  "hard": {
+                    "type": "enum",
+                    "weights": {
+                      "bounce": 1
+                    }
+                  },
+                  "soft": {
+                    "type": "enum",
+                    "weights": {
+                      "bounce": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "time_delay": {
+          "type": "biginteger",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 600000,
+              "max": 259200000
+            }
+          }
+        },
+        "click_delay": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 30000,
+              "max": 600000
+            }
+          }
+        },
+        "timestamp": {
+          "type": "datetime",
+          "value": {
+            "type": "case",
+            "check": "y == 0",
+            "branches": {
+              "true": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$mailchimp_email_activity.send_time + $$self.time_delay"
+                }
+              },
+              "false": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$$mult$mailchimp_email_activity__activity$0.0.timestamp + $$self.click_delay"
+                }
+              }
+            }
+          }
         }
       }
     }
   }
 }
+

@@ -243,8 +243,10 @@
           calculated (try (if (> (count primitives) 1) ; If there's only 1 primitive, no calculation required
                             (apply (functionize $=) primitives) ; this allows strings to be returned as well
                             (first primitives))
-                          (catch Exception e (do (println "PROBLEM" primitives)
+                          (catch Exception e (do (println "PROBLEM" equation primitives this model)
                                                  (throw e))))]
+      (when (nil? calculated)
+        (println "NIL FORMULA! " equation " " equation-resolved  calculated))
       calculated)))
 
 (defmulti field-data* (fn [value _]

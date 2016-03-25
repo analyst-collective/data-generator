@@ -2,7 +2,8 @@
   (:require [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
             [clojure.java.jdbc :as j]
-            [clj-time.coerce :refer [from-long to-sql-time]]
+            [clj-time.coerce :refer [from-long to-sql-time to-long]]
+            [clj-time.jdbc] ; For defaulting to joda objects when using jdbc via protol extension
             [incanter.distributions :as id] ;; functions are resovled in this namespace
             [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
             [clojure.math.combinatorics :as combo]
@@ -40,6 +41,13 @@
                   (thread (inserter insert-ch)))
                 (range n))))
 
+(defn date->long
+  [value]
+  ;; (println "datetolong" value (class value))
+  (if (#{java.util.Date org.joda.time.DateTime} (class value))
+    (to-long value)
+    value))
+
 (defn insert
   [config table model orig-model iteration out-chan]
   (let [db-spec (:database config)
@@ -52,9 +60,14 @@
                                          (throw e))))]
     ;; (println "ROW" row)
     (when out-chan
-      (>!! out-chan {:src-item #_row (merge row orig-model) ;; Merge puts dates back into long format
-                                                            ;; but keeps autoincrents from db
-                     :iteration iteration}))))
+      (let [fixed-row (reduce-kv (fn [m k v]
+                                   (assoc m k (date->long v)))
+                                 row
+                                 row)]
+        ;; (println "FIXDATES" row fixed-row)
+        (>!! out-chan {:src-item fixed-row  #_row #_(merge row orig-model) ;; Merge puts dates back into long format
+                       ;; but keeps autoincrents from db
+                       :iteration iteration})))))
 
 (defn run-fns
   ([config fn-coll model context]
@@ -77,12 +90,19 @@
 
 (defn coerce-dates
   [item data]
-  (reduce-kv (fn [new-item field fdata]
-               (if (#{:timestamp-with-time-zone} (:type-norm fdata))
-                 (assoc new-item field (-> item field long to-sql-time) #_(-> item field long from-long))
-                 new-item))
-             item
-             (:model data)))
+  (try (reduce-kv (fn [new-item field fdata]
+                    (if (#{:timestamp-with-time-zone} (:type-norm fdata))
+                      (let [value (field item)]
+                        (if (nil? value)
+                          (assoc new-item field value)
+                          (if (#{java.util.Date org.joda.time.DateTime} (class value))
+                            (assoc new-item field (to-sql-time value))
+                            (assoc new-item field (-> value long to-sql-time)))))
+                      new-item))
+                  item
+                  (:model data))
+       (catch Exception e (do (println "Date coercion failure" item data)
+                              (throw e)))))
 
 (defn generate-model*
   [config dependencies table iterations insert-ch]
@@ -135,14 +155,16 @@
         quantity (-> (quantity-fn :quantity {} models :iteration (:iteration context))
                      :this
                      :quantity)
-        rounded  (Math/round (double quantity))]
+        rounded  (try (Math/round (double quantity))
+                      (catch Exception e (println "QUANTERROR" quantity table models context)))]
     rounded))
 
 (defn generate-model-from-source-permutation
   [config table models iteration insert-ch src-pub permutations]
   (when-let [permutation (first permutations)]
     (let [foreach-keys (-> config :models table :foreach-keys)
-          foreach-zipped (zipmap foreach-keys permutation)
+          foreach-zipped (clojure.walk/prewalk date->long (zipmap foreach-keys permutation))
+          ;; _ (println "FOREACH ZIPPED" foreach-zipped)
           ;; models (assoc foreach-zipped src-table src-item)
           new-models (merge foreach-zipped models)
           quantity (calculate-quantity config table models {:iteration iteration})
