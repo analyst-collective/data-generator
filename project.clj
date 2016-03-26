@@ -6,6 +6,7 @@
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [cheshire "5.5.0"]
                  [org.clojure/java.jdbc "0.4.2"]
+                 [hikari-cp "1.6.1"]
                  [org.postgresql/postgresql "9.4-1201-jdbc41"]
                  [org.xerial/sqlite-jdbc "3.8.11.2"]
                  [sqlingvo "0.8.6"]

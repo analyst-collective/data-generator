@@ -24,7 +24,8 @@
     (-> config-prepped
         (build/generators dependencies)
         (generator/generate dependencies)
-        schema/drop-virtual-columns)))
+        schema/drop-virtual-columns
+        )))
 
 (defn -main
   "I don't do a whole lot ... yet."

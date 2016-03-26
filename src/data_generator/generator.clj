@@ -50,12 +50,13 @@
 
 (defn insert
   [config table model orig-model iteration out-chan]
-  (let [db-spec (:database config)
+  (let [db-spec (:pool #_:database config)
         insert-statement (sql/sql (sql/insert pg table []
                                        (sql/values [model])))
         prepped [(first insert-statement) (rest insert-statement)]
         ;; _ (println "INSERT PREPPED" prepped)
-        row (try (apply j/db-do-prepared-return-keys db-spec prepped)
+        row (try (j/with-db-connection [conn {:datasource db-spec}]
+                     (apply j/db-do-prepared-return-keys conn #_db-spec prepped))
                  (catch Exception e (do (println "TROUBLE" prepped)
                                          (throw e))))]
     ;; (println "ROW" row)
@@ -64,6 +65,8 @@
                                    (assoc m k (date->long v)))
                                  row
                                  row)]
+        #_(when (= table :mailchimp_members)
+          (println "MEMBER" row fixed-row))
         ;; (println "FIXDATES" row fixed-row)
         (>!! out-chan {:src-item fixed-row  #_row #_(merge row orig-model) ;; Merge puts dates back into long format
                        ;; but keeps autoincrents from db

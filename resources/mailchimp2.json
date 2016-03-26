@@ -297,12 +297,11 @@
     "mailchimp_sent_to": {
       "model": {
         "campaign_id": {
-          "type": "association",
-          "master": {
-            "model": "mailchimp_campaigns",
-            "foreach": {
-              "model": "mailchimp_members",
-              "filter": "$mailchimp_campaigns.recipients__list_id = $mailchimp_members.list_id && $mailchimp_members.timestamp_signup < $mailchimp_campaigns.send_time && $mailchimp_campaigns.send_time < $mailchimp_members.unsubscribe_date"
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mailchimp_campaigns.id": 1
             }
           }
         },
@@ -315,11 +314,12 @@
           }
         },
         "email_id": {
-          "type": "string",
-          "value": {
-            "type": "enum",
-            "weights": {
-              "$mailchimp_members.id": 1
+          "type": "association",
+          "master": {
+            "model": "mailchimp_members",
+            "foreach": {
+              "model": "mailchimp_campaigns",
+              "filter": "$mailchimp_campaigns.recipients__list_id = $mailchimp_members.list_id && $mailchimp_members.timestamp_signup < $mailchimp_campaigns.send_time && $mailchimp_campaigns.send_time < $mailchimp_members.unsubscribe_date"
             }
           }
         },

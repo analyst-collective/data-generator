@@ -5,6 +5,7 @@
             [taoensso.timbre :as timbre :refer [info warn error]]
             [clojure.math.combinatorics :as combo]
             [clojure.java.jdbc :as j]
+            [hikari-cp.core :as pool]
             [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
             [incanter.distributions :as id]
@@ -16,21 +17,26 @@
             [faker.name]
             [faker.phone_number]))
 
+(defn add-pool
+  [config]
+  (let [database (:database config)
+        datasource-config (assoc {}
+                                 :username (:user database)
+                                 :password (:password database)
+                                 :adapter (:dbtype database)
+                                 :port-number (:port database)
+                                 :database-name (:dbname database)
+                                 :server-name (:host database)
+                                 :maximum-pool-size 80)
+        datasource (pool/make-datasource datasource-config)]
+    (assoc config :pool datasource)))
 
-
-#_(defn permutate
-  ([coll-of-colls]
-   (permutate (rest coll-of-colls) (first coll-of-colls) []))
-  ([rem-colls this-coll agg]
-   (let [next-coll (first rem-colls)
-         this-item (first this-coll)]
-     (when this-item
-       (if next-coll
-         (do (permutate (rest rem-colls) next-coll (conj agg this-item))
-             (permutate rem-colls (rest this-coll) agg))
-         (do
-           (println (conj agg this-item))
-           (recur rem-colls (rest this-coll) agg)))))))
+(defn date->long
+  [value]
+  ;; (println "datetolong" value (class value))
+  (if (#{java.util.Date org.joda.time.DateTime} (class value))
+    (c/to-long value)
+    value))
 
 (def pg (postgresql))
 
@@ -122,7 +128,7 @@
 (defn query-all-filtered
   [table filter-list]
   (sql/sql
-   (sql/select pg [:*] (sql/from table) (sql/where (filter->where-criteria filter-list)))))
+   (sql/select pg [:*] (sql/from table) (sql/where filter-list))))
 
 ;; http://stackoverflow.com/questions/9273333/in-clojure-how-to-apply-a-macro-to-a-list
 ;; The incanter macro "$=" is used to allow users to write infix notation formula's. Since we don't know
@@ -148,9 +154,12 @@
   [value ftype]
   (try (if (nil? value)
          value
-         (let [str-value (if (keyword? value)
-                           (name value)
-                           (str value))]
+         (let [primitive-value (if (#{org.joda.time.DateTime java.util.Date} (class value))
+                                 (c/to-long value)
+                                 value)
+               str-value (if (keyword? primitive-value)
+                           (name primitive-value)
+                           (str primitive-value))]
            (if (#{:text} ftype) ;; edn/read-string errors on strings that start with a digit
              str-value
              (let [read-value (edn/read-string str-value)]
@@ -245,8 +254,6 @@
                             (first primitives))
                           (catch Exception e (do (println "PROBLEM" equation primitives this model)
                                                  (throw e))))]
-      (when (nil? calculated)
-        (println "NIL FORMULA! " equation " " equation-resolved  calculated))
       calculated)))
 
 (defmulti field-data* (fn [value _]
@@ -487,12 +494,17 @@
                                   (-> config :models table :model filter-field :type-norm))
                     other (apply hash-map more)
                     database (-> other :config :database)
+                    pool (-> other :config :pool)
                     ;; _ (println "PREPPED" filter-prepped)
                     resolved-where (map #(resolve-references % this model) filter-prepped)
                     primitives-where (map str->primitive resolved-where)
-                    resolved-value (some #(and (number? %) %) primitives-where)
-                    normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
-                                              primitives-where)
+                    ;; resolved-value (some #(and (number? %) %) primitives-where)
+                    resolved-value (let [no-op [(first primitives-where) (last primitives-where)]]
+                                     (first (remove keyword? no-op)))
+                    normalized-where (try (replace {resolved-value (coerce-sql resolved-value filter-type) #_(normalize-filter filter-type resolved-value)}
+                                                   primitives-where)
+                                          (catch Exception e (do (println "NORMALIZE FILTER ERROR" filter-criteria filter-prepped primitives-where model)
+                                                                 (throw e))))
                     query-statement (cond
                                       (and weight filter-prepped) (query-filtered-weighted table
                                                                                            ;; filter-prepped
@@ -501,11 +513,17 @@
                                                                                            weight
                                                                                            field)
                                       weight (query-weighted table weight field)
-                                      filter-prepped (query-filtered table filter-prepped)
+                                      filter-prepped (query-filtered table normalized-where #_filter-prepped)
                                       :else (query table))
                     ;; _ (println "STATEMENT" query-statement)
-                    result (first (j/query database query-statement))
-                    new-models (assoc model table result)]
+                    ;; result (first (j/query pool #_database query-statement))
+                    result (first (j/with-db-connection [conn {:datasource pool}]
+                                    (j/query conn query-statement)))
+                    fixed-dates (reduce-kv (fn [m k v]
+                                           (assoc m k (date->long v)))
+                                         result
+                                         result)
+                    new-models (assoc model table fixed-dates)]
                 (if-not result
                   {:this (assoc this mkey :none)
                    :models new-models}
@@ -550,7 +568,7 @@
      (let [new-item (or (master-column config mdata)
                         (independant-column config mdata deps table)
                         (do (println "REMAINING DEPS" deps)
-                            (throw (Exception. (str "Circular dependency!")))))
+                            (throw (Exception. (str "Circular dependency!" table)))))
            new-mdata (dissoc mdata (:key new-item))
            new-deps (remove-field-dep deps table (:key new-item))
            new-fn-list (conj fn-list new-item) #_(conj fn-list
@@ -599,48 +617,24 @@
   [foreach]
   (let [table (-> foreach :model keyword)
         filter-criteria (:filter foreach)
-        
-        ;; filter-split (map #(map #(s/split ) %) filter-criteria-and-split)
-        ;; filter-split (s/split filter-criteria #"\s+")
         filter-split (split-filter filter-criteria)
         filter-prepped (prep-filter filter-split table)
-        ;; filter-prepped (when filter-split
-        ;;                  (reduce (fn [agg value]
-        ;;                            (let [pattern (re-pattern
-        ;;                                           (str "(?:^|\\s|\\()(\\$"
-        ;;                                                (name table)
-        ;;                                                "\\.[\\w]+)"))
-        ;;                                  match (->> value
-        ;;                                             (re-find pattern)
-        ;;                                             last)
-        ;;                                  replacement (when match
-        ;;                                                (-> match
-        ;;                                                    (s/split #"\.")
-        ;;                                                    last
-        ;;                                                    keyword))
-        ;;                                  _ (println "FOREACH MID " value pattern match replacement)]
-        ;;                              (if replacement
-        ;;                                (conj agg replacement)
-        ;;                                (conj agg value))))
-        ;;                          []
-        ;;                          filter-split))
-        
-        ;; filter-field (when filter-prepped
-        ;;                (some #(and (keyword? %) %) filter-prepped))
-        filter-fields (filter keyword? (flatten filter-prepped))
-        ;; _ (println "FOREACH INFO " filter-criteria filter-prepped filter-field)
-        ]
+        filter-fields (filter keyword? (flatten filter-prepped))]
     (if-not filter-criteria
       (fn foreach-all-fn
         [mkey this models & more]
         (let [other (apply hash-map more)
               database (-> other :config :database)
+              pool (-> other :config :pool)
               query-statement (query-all table)]
-          (j/query database query-statement)))
+          ;; (j/query pool #_database query-statement)
+          (j/with-db-connection [conn {:datasource pool}]
+            (j/query conn query-statement))))
       (fn foreach-filter-fn
         [mkey this models & more]
         (let [other (apply hash-map more)
               database (-> other :config :database)
+              pool (-> other :config :pool)
               filter-types (map #(-> other :config :models table :model % :type-norm) filter-fields)
               type-map (zipmap filter-fields filter-types)
               resolved-where (clojure.walk/prewalk #(resolve-references % this models) filter-prepped)
@@ -671,8 +665,10 @@
                                   (list * 'or constructed-ands)
                                   (first constructed-ands))
               query-statement (query-all-filtered table constructed-where)]
-          (println "FOREACH QUERY " query-statement)
-          (j/query database query-statement))))))
+          ;; (println "FOREACH QUERY " query-statement filter-prepped constructed-where)
+          ;; (j/query pool #_database query-statement)
+          (j/with-db-connection [conn {:datasource pool}]
+            (j/query conn query-statement)))))))
 
 (defn association-data
   "Adds quantifier function and likelyhood funciton"
@@ -716,15 +712,16 @@
 
 (defn generators
   [config dependencies]
-  (let [models (:models config)
+  (let [new-config (add-pool config)
+        models (:models config)
         ;; _ (println models)
         new-models (reduce-kv (fn [m table data]
-                                (let [fn-list (build-model-generator config table data dependencies)
+                                (let [fn-list (build-model-generator new-config table data dependencies)
                                       added-association-data (association-data data)
                                       new-data (assoc added-association-data :fn-list fn-list)]
                                   (assoc m table new-data)))
                               models
                               models)]
-    (assoc config :models new-models)))
+    (assoc new-config :models new-models)))
 
 
