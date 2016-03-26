@@ -197,28 +197,28 @@
         (close! insert-ch))
       (let [foreach-fns (-> config :models table :foreach-fns)]
         (if (seq foreach-fns)
-          (let [foreach-fns-evaluated (map #(% :dummy-key
-                                               {}
-                                               {src-table src-item}
-                                               :iteration iteration
-                                               :config config)
-                                             foreach-fns)
-                permutations (apply combo/cartesian-product foreach-fns-evaluated)]
-            (generate-model-from-source-permutation config
+          (generate-model-from-source-permutation config
                                                     table
                                                     {src-table src-item}
                                                     iteration
                                                     insert-ch
                                                     src-pub
-                                                    permutations))
+                                                    ;; permutations
+                                                    (apply combo/cartesian-product
+                                                           (map #(% :dummy-key
+                                                                    {}
+                                                                    {src-table src-item}
+                                                                    :iteration iteration
+                                                                    :config config)
+                                                                foreach-fns)))
           (let [quantity (calculate-quantity config table {src-table src-item} {:iteration iteration})]
             (generate-model-from-source-helper config
                                                table
                                                {src-table src-item}
                                                insert-ch
                                                src-pub
-                                               {:iteration iteration :quantity quantity #_rounded}
-                                               (range quantity #_rounded))))
+                                               {:iteration iteration :quantity quantity}
+                                               (range quantity))))
         (recur config dependencies table src-table src-ch insert-ch)))))
 
 (defn generate-model
@@ -252,10 +252,9 @@
                                   m))
                               {}
                               (-> config :models table :model))
-            _ (println "GM" table (:count master))
-            iterations (range (:count master))]
+            _ (println "GM" table (:count master))]
         (println "Launching" table "with iteration. Count:" (:count master))
-        (generate-model* config dependencies table iterations insert-ch)
+        (generate-model* config dependencies table (range (:count master)) insert-ch)
         (println "Should be soon closeing src-pub of" table)
         (signal-model-complete table inserting-done-ch done-ch src-pub)
         true)))) ; Mark model done (when run via clojure.async.core/thread without returning nil
