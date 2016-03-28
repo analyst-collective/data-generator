@@ -12,20 +12,6 @@
 (def pg (postgresql))
 (def lite (sqlite))
 
-(defn permutate
-  ([coll-of-colls]
-   (permutate (rest coll-of-colls) (first coll-of-colls) []))
-  ([rem-colls this-coll agg]
-   (let [next-coll (first rem-colls)
-         this-item (first this-coll)]
-     (when this-item
-       (if next-coll
-         (do (permutate (rest rem-colls) next-coll (conj agg this-item))
-             (permutate rem-colls (rest this-coll) agg))
-         (do
-           (println (conj agg this-item))
-           (recur rem-colls (rest this-coll) agg)))))))
-
 (defn inserter
   [insert-ch]
   (let [function (<!! insert-ch)]
@@ -224,7 +210,7 @@
 (defn generate-model
   [config dependencies table]
   (let [insert-ch (chan 1000)
-        inserting-done-ch (launch-inserters insert-ch 10)
+        
         done-ch (-> dependencies table :done-chan)
         src-sub (-> dependencies table :src-sub)
         src-pub (-> dependencies table :src-pub)
@@ -238,8 +224,9 @@
                             (close! dummy-chan) ;; Pre-close dummy chan so model starts immediately
                             dummy-chan))
                         (catch Exception e (do (println "DEPCHAN ERROR" dependency-chans)
-                                               (throw e))))]
-    (<!! start-chan) ;; Block until all dependent tables are done
+                                               (throw e))))
+        _ (<!! start-chan) ;; Block until all dependent tables are done
+        inserting-done-ch (launch-inserters insert-ch 10)]
     (if src-sub
       (let [src-table (-> dependencies table :table-dep :source first)]
         (println "Launching" table "with channel source")

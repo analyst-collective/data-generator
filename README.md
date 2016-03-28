@@ -1,3 +1,7 @@
+# WARNING
+
+This tool is currently experimental. While functioning, it's currently buggy and unstable. Do not procede unless you are comfortable debugging Clojure code and submitting issues to this repo (highly encouraged!).
+
 # data-generator
 
 This is a tool for generating demonstration datasets that conform to a specified shape or pattern.
