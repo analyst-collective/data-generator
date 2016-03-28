@@ -2,9 +2,11 @@
   (:require [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
             [clojure.java.jdbc :as j]
-            [clj-time.coerce :refer [from-long to-sql-time]]
+            [clj-time.coerce :refer [from-long to-sql-time to-long]]
+            [clj-time.jdbc] ; For defaulting to joda objects when using jdbc via protol extension
             [incanter.distributions :as id] ;; functions are resovled in this namespace
             [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
+            [clojure.math.combinatorics :as combo]
             [clojure.core.async :as a :refer [<!! <! >!! >! chan close! thread]]))
 
 (def pg (postgresql))
@@ -25,19 +27,36 @@
                   (thread (inserter insert-ch)))
                 (range n))))
 
+(defn date->long
+  [value]
+  ;; (println "datetolong" value (class value))
+  (if (#{java.util.Date org.joda.time.DateTime} (class value))
+    (to-long value)
+    value))
+
 (defn insert
-  [config table model iteration out-chan]
-  (let [db-spec (:database config)
+  [config table model orig-model iteration out-chan]
+  (let [db-spec (:pool #_:database config)
         insert-statement (sql/sql (sql/insert pg table []
                                        (sql/values [model])))
         prepped [(first insert-statement) (rest insert-statement)]
         ;; _ (println "INSERT PREPPED" prepped)
-        row (try (apply j/db-do-prepared-return-keys db-spec prepped)
+        row (try (j/with-db-connection [conn {:datasource db-spec}]
+                     (apply j/db-do-prepared-return-keys conn #_db-spec prepped))
                  (catch Exception e (do (println "TROUBLE" prepped)
                                          (throw e))))]
     ;; (println "ROW" row)
     (when out-chan
-      (>!! out-chan {:src-item row :iteration iteration}))))
+      (let [fixed-row (reduce-kv (fn [m k v]
+                                   (assoc m k (date->long v)))
+                                 row
+                                 row)]
+        #_(when (= table :mailchimp_members)
+          (println "MEMBER" row fixed-row))
+        ;; (println "FIXDATES" row fixed-row)
+        (>!! out-chan {:src-item fixed-row  #_row #_(merge row orig-model) ;; Merge puts dates back into long format
+                       ;; but keeps autoincrents from db
+                       :iteration iteration})))))
 
 (defn run-fns
   ([config fn-coll model context]
@@ -60,12 +79,19 @@
 
 (defn coerce-dates
   [item data]
-  (reduce-kv (fn [new-item field fdata]
-               (if (#{:timestamp-with-time-zone} (:type-norm fdata))
-                 (assoc new-item field (-> item field long to-sql-time) #_(-> item field long from-long))
-                 new-item))
-             item
-             (:model data)))
+  (try (reduce-kv (fn [new-item field fdata]
+                    (if (#{:timestamp-with-time-zone} (:type-norm fdata))
+                      (let [value (field item)]
+                        (if (nil? value)
+                          (assoc new-item field value)
+                          (if (#{java.util.Date org.joda.time.DateTime} (class value))
+                            (assoc new-item field (to-sql-time value))
+                            (assoc new-item field (-> value long to-sql-time)))))
+                      new-item))
+                  item
+                  (:model data))
+       (catch Exception e (do (println "Date coercion failure" item data)
+                              (throw e)))))
 
 (defn generate-model*
   [config dependencies table iterations insert-ch]
@@ -80,9 +106,7 @@
       (let [item (run-fns config fn-list {} {:iteration iteration})
             skip? (->> item vals (some #{:none}))] ;; Select association returned nothing
         (when-not skip?
-          (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub))
-          ;; (insert config table (coerce-dates item data) src-pub)
-          )
+          (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub)))
         (recur config dependencies table (rest iterations) insert-ch)))))
 
 (defn signal-model-complete
@@ -99,7 +123,7 @@
       (recur table listen-ch signal-ch pub-ch))))
 
 (defn generate-model-from-source-helper
-  [config table src-item models insert-ch src-pub context seq-range]
+  [config table models insert-ch src-pub context seq-range]
   (if-let [n (first seq-range)]
     (let [fn-list (-> config :models table :fn-list)
           data (-> config :models table)
@@ -111,50 +135,98 @@
           skip? (->> item vals (some #{:none}))]
       (when-not (or skip? (not create?))
         (let [iteration (:iteration new-context)]
-          (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub))))
-      (recur config table src-item new-models insert-ch src-pub new-context (rest seq-range)))))
+          (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub))))
+      (recur config table new-models insert-ch src-pub new-context (rest seq-range)))))
+
+(defn calculate-quantity
+  [config table models context]
+  (let [quantity-fn (-> config :models table :quantity-fn)
+        quantity (-> (quantity-fn :quantity {} models :iteration (:iteration context))
+                     :this
+                     :quantity)
+        rounded  (try (Math/round (double quantity))
+                      (catch Exception e (println "QUANTERROR" quantity table models context)))]
+    rounded))
+
+(defn generate-model-from-source-permutation
+  [config table models iteration insert-ch src-pub permutations]
+  (when-let [permutation (first permutations)]
+    (let [foreach-keys (-> config :models table :foreach-keys)
+          foreach-zipped (clojure.walk/prewalk date->long (zipmap foreach-keys permutation))
+          ;; _ (println "FOREACH ZIPPED" foreach-zipped)
+          ;; models (assoc foreach-zipped src-table src-item)
+          new-models (merge foreach-zipped models)
+          quantity (calculate-quantity config table models {:iteration iteration})
+          ;; quantity-fn (-> config :models table :quantity-fn)
+          ;; quantity (-> (quantity-fn :quantity {} models :iteration iteration)
+                       ;; :this
+                       ;; :quantity)
+          ;; rounded  (Math/round (double quantity))
+          ]
+      (generate-model-from-source-helper config
+                                         table
+                                         ;; src-item
+                                         new-models
+                                         insert-ch
+                                         src-pub
+                                         {:iteration iteration :quantity quantity}
+                                         (range quantity))
+      (recur config table models iteration insert-ch src-pub (rest permutations)))))
 
 (defn generate-model-from-source*
   [config dependencies table src-table src-ch insert-ch]
   (let [{:keys [src-item iteration]} (<!! src-ch)
         src-pub (-> dependencies table :src-pub)]
-    ;; (println table "GOT" src-item)
-    ;; (println table src-table src-item)
     (if-not src-item
       (do
         (println table "recieved a nil! Closing insert channel")
         (close! insert-ch))
-      (let [quantity-fn (-> config :models table :quantity-fn)
-            ;; probability-fn (-> config :models table :probability-fn)
-            quantity (-> (quantity-fn :quantity {} {src-table src-item} :iteration iteration)
-                         :this
-                         :quantity)
-            rounded  (Math/round (double quantity))]
-        #_(doseq [n (range quantity)]
-          (let [fn-list (-> config :models table :fn-list)
-                data (-> config :models table)
-                item (run-fns config fn-list {src-table src-item} {:iteration iteration :sequence n})
-                create? (-> (probability-fn :create? {} src-item :iteration iteration) :this :create?)
-                skip? (->> item vals (some #{:none}))] ; Field failed to generate association
-            (when-not (or skip? (not create?))
-              (>!! insert-ch #(insert config table (coerce-dates item data) iteration src-pub)))))
-        (generate-model-from-source-helper config
-                                           table
-                                           src-item
-                                           {src-table src-item}
-                                           insert-ch
-                                           src-pub
-                                           {:iteration iteration :quantity rounded}
-                                           (range rounded))
+      (let [foreach-fns (-> config :models table :foreach-fns)]
+        (if (seq foreach-fns)
+          (generate-model-from-source-permutation config
+                                                    table
+                                                    {src-table src-item}
+                                                    iteration
+                                                    insert-ch
+                                                    src-pub
+                                                    ;; permutations
+                                                    (apply combo/cartesian-product
+                                                           (map #(% :dummy-key
+                                                                    {}
+                                                                    {src-table src-item}
+                                                                    :iteration iteration
+                                                                    :config config)
+                                                                foreach-fns)))
+          (let [quantity (calculate-quantity config table {src-table src-item} {:iteration iteration})]
+            (generate-model-from-source-helper config
+                                               table
+                                               {src-table src-item}
+                                               insert-ch
+                                               src-pub
+                                               {:iteration iteration :quantity quantity}
+                                               (range quantity))))
         (recur config dependencies table src-table src-ch insert-ch)))))
 
 (defn generate-model
   [config dependencies table]
   (let [insert-ch (chan 1000)
-        inserting-done-ch (launch-inserters insert-ch 10)
+        
         done-ch (-> dependencies table :done-chan)
         src-sub (-> dependencies table :src-sub)
-        src-pub (-> dependencies table :src-pub)]
+        src-pub (-> dependencies table :src-pub)
+        dependency-chans (->> dependencies table  :table-dep :select (map #(-> dependencies
+                                                                               %
+                                                                               :done-chan)))
+        _ (println "DEP CHANS" dependency-chans)
+        start-chan (try (if (seq dependency-chans)
+                          (a/merge dependency-chans 100) ;; Add buffer so models can close for sure 
+                          (let [dummy-chan (chan)]
+                            (close! dummy-chan) ;; Pre-close dummy chan so model starts immediately
+                            dummy-chan))
+                        (catch Exception e (do (println "DEPCHAN ERROR" dependency-chans)
+                                               (throw e))))
+        _ (<!! start-chan) ;; Block until all dependent tables are done
+        inserting-done-ch (launch-inserters insert-ch 10)]
     (if src-sub
       (let [src-table (-> dependencies table :table-dep :source first)]
         (println "Launching" table "with channel source")
@@ -167,9 +239,9 @@
                                   m))
                               {}
                               (-> config :models table :model))
-            iterations (range (:count master))]
+            _ (println "GM" table (:count master))]
         (println "Launching" table "with iteration. Count:" (:count master))
-        (generate-model* config dependencies table iterations insert-ch)
+        (generate-model* config dependencies table (range (:count master)) insert-ch)
         (println "Should be soon closeing src-pub of" table)
         (signal-model-complete table inserting-done-ch done-ch src-pub)
         true)))) ; Mark model done (when run via clojure.async.core/thread without returning nil
@@ -183,6 +255,7 @@
 
 (defn generate
   [config dependencies]
+  (println "GENERATENOW" config)
   (let [model-done-chans (map (fn [[table _]]
                                 (thread (generate-model config dependencies table)))
                               (:models config))

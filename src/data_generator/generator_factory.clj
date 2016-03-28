@@ -1,8 +1,11 @@
 (ns data-generator.generator-factory
   (:require [clj-time.coerce :as c]
             [clojure.string :as s]
+            [clojure.edn :as edn]
             [taoensso.timbre :as timbre :refer [info warn error]]
+            [clojure.math.combinatorics :as combo]
             [clojure.java.jdbc :as j]
+            [hikari-cp.core :as pool]
             [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql sqlite]]
             [incanter.distributions :as id]
@@ -13,6 +16,27 @@
             [faker.lorem]
             [faker.name]
             [faker.phone_number]))
+
+(defn add-pool
+  [config]
+  (let [database (:database config)
+        datasource-config (assoc {}
+                                 :username (:user database)
+                                 :password (:password database)
+                                 :adapter (:dbtype database)
+                                 :port-number (:port database)
+                                 :database-name (:dbname database)
+                                 :server-name (:host database)
+                                 :maximum-pool-size 80)
+        datasource (pool/make-datasource datasource-config)]
+    (assoc config :pool datasource)))
+
+(defn date->long
+  [value]
+  ;; (println "datetolong" value (class value))
+  (if (#{java.util.Date org.joda.time.DateTime} (class value))
+    (c/to-long value)
+    value))
 
 (def pg (postgresql))
 
@@ -96,7 +120,15 @@
        (sql/order-by :random_col_for_sorting)
        (sql/limit 1))))
 
+(defn query-all
+  [table]
+  (sql/sql
+   (sql/select pg [:*] (sql/from table))))
 
+(defn query-all-filtered
+  [table filter-list]
+  (sql/sql
+   (sql/select pg [:*] (sql/from table) (sql/where filter-list))))
 
 ;; http://stackoverflow.com/questions/9273333/in-clojure-how-to-apply-a-macro-to-a-list
 ;; The incanter macro "$=" is used to allow users to write infix notation formula's. Since we don't know
@@ -119,20 +151,36 @@
   
   JSON requires string keys. JSON parsing turns string keys into keywords.
   Coercion of values into the final type is required"
-  [value type]
-  (if (nil? value)
-    value
-    (let [str-value (if (keyword? value)
-                      (name value)
-                      (str value))]
-      (cond
-        (#{:integer :serial} type) (Integer/parseInt str-value)
-        (#{:bigserial :bigint} type) (bigint str-value)
-        (#{:boolean} type) (Boolean/valueOf str-value)
-        (#{:real} type) ((Float/parseFloat str-value))
-        (#{:double} type) (Double/parseDouble str-value)
-        (#{:date :datetime :timestamp-with-time-zone} type) (c/from-long (Integer/parseInt value))
-        (#{:text} type) str-value))))
+  [value ftype]
+  (try (if (nil? value)
+         value
+         (let [primitive-value (if (#{org.joda.time.DateTime java.util.Date} (class value))
+                                 (c/to-long value)
+                                 value)
+               str-value (if (keyword? primitive-value)
+                           (name primitive-value)
+                           (str primitive-value))]
+           (if (#{:text} ftype) ;; edn/read-string errors on strings that start with a digit
+             str-value
+             (let [read-value (edn/read-string str-value)]
+               (cond
+                 (#{:integer :serial} ftype) (int read-value)
+                 (#{:bigserial :bigint} ftype) (bigint read-value)
+                 (#{:boolean} ftype) (if read-value
+                                       true
+                                       false)
+                 (#{:real} ftype) (float read-value)
+                 (#{:double} ftype) (double read-value)
+                 (#{:date :datetime :timestamp-with-time-zone} ftype) (c/from-long (long read-value)))))))
+       (catch Exception e (do (println "COERCE ERROR" value (class value) ftype)
+                              (throw e)))))
+
+(defn coerce-sql
+  [value ftype]
+  (let [coerced (coerce value ftype)]
+    (if (and coerced (#{:date :datetime :timestamp-with-time-zone} ftype)) ;; Truth test for nil time
+      (c/to-sql-time coerced)
+      coerced)))
 
 (defn resolve-references
   [raw this models]
@@ -175,6 +223,10 @@
       (Double/parseDouble number)
       (symbol string))))
 
+(defn remove-comparitor
+  [[a comparitor b]]
+  [a b])
+
 (defn calculate-formula
   [equation this model more]
   (if-not (instance? java.lang.String equation)
@@ -200,7 +252,7 @@
           calculated (try (if (> (count primitives) 1) ; If there's only 1 primitive, no calculation required
                             (apply (functionize $=) primitives) ; this allows strings to be returned as well
                             (first primitives))
-                          (catch Exception e (do (println "PROBLEM" primitives)
+                          (catch Exception e (do (println "PROBLEM" equation primitives this model)
                                                  (throw e))))]
       calculated)))
 
@@ -307,7 +359,7 @@
                                               minimum (resolve-references minimum this model)
                                               diff (-' maximum minimum)]
                                           {:this (assoc this mkey (-> diff rand int (+ minimum)))
-                                           :models model}))
+                                           :models model})) 
       (#{:real} type-norm) (fn gf_range [mkey this model & more]
                              ;; (println mkey value)
                              (let [maximum (resolve-references maximum this model)
@@ -321,7 +373,14 @@
                                      minimum (resolve-references minimum this model)
                                      diff (-' maximum minimum)]
                                  {:this (assoc this mkey (-> diff rand (+ minimum)))
-                                  :models model})))))
+                                  :models model}))
+      (#{:timestamp-with-time-zone} type-norm) (fn gf_range [mkey this model & more]
+                                                 (let [maximum (resolve-references maximum this model)
+                                                       minimum (resolve-references minimum this model)
+                                                       diff (-' maximum minimum)]
+                                                   ;; (println "timestamp range" minimum maximum)
+                                                   {:this (assoc this mkey (-> diff rand long (+ minimum)))
+                                                    :models model})))))
 
 (defmethod field-data* "faker"
   [value type-norm]
@@ -435,15 +494,17 @@
                                   (-> config :models table :model filter-field :type-norm))
                     other (apply hash-map more)
                     database (-> other :config :database)
+                    pool (-> other :config :pool)
                     ;; _ (println "PREPPED" filter-prepped)
                     resolved-where (map #(resolve-references % this model) filter-prepped)
-                    ;; _ (println "RESOLVED" resolved-where)
                     primitives-where (map str->primitive resolved-where)
-                    ;; _ (println "RESOLVED WHERE" resolved-where)
-                    ;; _ (println "RESOLVED TYPE" (class (second resolved-where)))
-                    resolved-value (some #(and (number? %) %) primitives-where)
-                    normalized-where (replace {resolved-value (normalize-filter filter-type resolved-value)}
-                                              primitives-where)
+                    ;; resolved-value (some #(and (number? %) %) primitives-where)
+                    resolved-value (let [no-op [(first primitives-where) (last primitives-where)]]
+                                     (first (remove keyword? no-op)))
+                    normalized-where (try (replace {resolved-value (coerce-sql resolved-value filter-type) #_(normalize-filter filter-type resolved-value)}
+                                                   primitives-where)
+                                          (catch Exception e (do (println "NORMALIZE FILTER ERROR" filter-criteria filter-prepped primitives-where model)
+                                                                 (throw e))))
                     query-statement (cond
                                       (and weight filter-prepped) (query-filtered-weighted table
                                                                                            ;; filter-prepped
@@ -452,11 +513,17 @@
                                                                                            weight
                                                                                            field)
                                       weight (query-weighted table weight field)
-                                      filter-prepped (query-filtered table filter-prepped)
+                                      filter-prepped (query-filtered table normalized-where #_filter-prepped)
                                       :else (query table))
                     ;; _ (println "STATEMENT" query-statement)
-                    result (first (j/query database query-statement))
-                    new-models (assoc model table result)]
+                    ;; result (first (j/query pool #_database query-statement))
+                    result (first (j/with-db-connection [conn {:datasource pool}]
+                                    (j/query conn query-statement)))
+                    fixed-dates (reduce-kv (fn [m k v]
+                                           (assoc m k (date->long v)))
+                                         result
+                                         result)
+                    new-models (assoc model table fixed-dates)]
                 (if-not result
                   {:this (assoc this mkey :none)
                    :models new-models}
@@ -501,13 +568,107 @@
      (let [new-item (or (master-column config mdata)
                         (independant-column config mdata deps table)
                         (do (println "REMAINING DEPS" deps)
-                            (throw (Exception. (str "Circular dependency!")))))
+                            (throw (Exception. (str "Circular dependency!" table)))))
            new-mdata (dissoc mdata (:key new-item))
            new-deps (remove-field-dep deps table (:key new-item))
            new-fn-list (conj fn-list new-item) #_(conj fn-list
                                            (partial (:fn new-item)
                                                     (:key new-item)))]
        (recur config table new-mdata new-deps new-fn-list)))))
+
+(defn split-filter
+  [filter-string]
+  (when filter-string
+    (let [filter-criteria-or-split (s/split filter-string #"\s+\|\|\s+")
+          filter-criteria-and-split (map #(s/split % #"\s+&&\s+") filter-criteria-or-split)
+          filter-split (map (fn [and-vectors]
+                              (map #(s/split % #"\s+") and-vectors))
+                            filter-criteria-and-split)]
+      filter-split)))
+
+(defn prep-filter-seq
+  [filter-seq table]
+  (reduce (fn [agg value]
+            (let [pattern (re-pattern
+                           (str "(?:^|\\s|\\()(\\$"
+                                (name table)
+                                "\\.[\\w]+)"))
+                  match (->> value
+                             (re-find pattern)
+                             last)
+                  replacement (when match
+                                (-> match
+                                    (s/split #"\.")
+                                    last
+                                    keyword))]
+              (if replacement
+                (conj agg replacement)
+                (conj agg value))))
+          []
+          filter-seq))
+
+(defn prep-filter
+  [split-filter table]
+  (map (fn [and-vectors]
+         (map #(prep-filter-seq % table) and-vectors))
+       split-filter))
+
+(defn foreach-fn-generator
+  [foreach]
+  (let [table (-> foreach :model keyword)
+        filter-criteria (:filter foreach)
+        filter-split (split-filter filter-criteria)
+        filter-prepped (prep-filter filter-split table)
+        filter-fields (filter keyword? (flatten filter-prepped))]
+    (if-not filter-criteria
+      (fn foreach-all-fn
+        [mkey this models & more]
+        (let [other (apply hash-map more)
+              database (-> other :config :database)
+              pool (-> other :config :pool)
+              query-statement (query-all table)]
+          ;; (j/query pool #_database query-statement)
+          (j/with-db-connection [conn {:datasource pool}]
+            (j/query conn query-statement))))
+      (fn foreach-filter-fn
+        [mkey this models & more]
+        (let [other (apply hash-map more)
+              database (-> other :config :database)
+              pool (-> other :config :pool)
+              filter-types (map #(-> other :config :models table :model % :type-norm) filter-fields)
+              type-map (zipmap filter-fields filter-types)
+              resolved-where (clojure.walk/prewalk #(resolve-references % this models) filter-prepped)
+              normalized-where (map (fn [and-vectors]
+                                   (map (fn [filter-seq]
+                                          (let [no-operator (remove-comparitor filter-seq)
+                                                resolved-value (first (filter (complement keyword?)
+                                                                              no-operator))
+                                                filter-field (first (filter keyword?
+                                                                            no-operator))
+                                                filter-type (filter-field type-map)
+                                                coerced-value (coerce-sql resolved-value filter-type)
+                                                operator-value (second filter-seq)
+                                                normalized-seq (into []
+                                                                     (replace
+                                                                      {resolved-value coerced-value
+                                                                       operator-value (symbol operator-value)}
+                                                                      filter-seq))]
+                                            (filter->where-criteria (reverse (into (list) normalized-seq)))))
+                                        and-vectors))
+                                 resolved-where)
+              constructed-ands (map (fn [and-vectors]
+                                      (if (< 1 (count and-vectors))
+                                        (list* 'and and-vectors)
+                                        (first and-vectors)))
+                                    normalized-where)
+              constructed-where (if (< 1 (count constructed-ands))
+                                  (list * 'or constructed-ands)
+                                  (first constructed-ands))
+              query-statement (query-all-filtered table constructed-where)]
+          ;; (println "FOREACH QUERY " query-statement filter-prepped constructed-where)
+          ;; (j/query pool #_database query-statement)
+          (j/with-db-connection [conn {:datasource pool}]
+            (j/query conn query-statement)))))))
 
 (defn association-data
   "Adds quantifier function and likelyhood funciton"
@@ -518,7 +679,14 @@
                                              (:master fdata))]
                  (if-not master-association?
                    agg
-                   (let [quantity (-> fdata :master :quantity)
+                   (let [foreach (-> fdata :master :foreach)
+                         foreach-arr (when foreach
+                                       (if (instance? clojure.lang.IPersistentMap foreach)
+                                         [foreach]
+                                         foreach))
+                         foreach-keys (map #(-> % :model keyword) foreach-arr)
+                         foreach-fns (map foreach-fn-generator foreach-arr)
+                         quantity (-> fdata :master :quantity)
                          quantity-fn (if quantity
                                        (field-data* quantity :integer)
                                        (fn [mkey this model & more]
@@ -529,22 +697,31 @@
                          probability-fn (fn [mkey this model & more]
                                           {:this (assoc this mkey (< (rand) probability))
                                            :models model})
-                         with-fns (assoc agg :quantity-fn quantity-fn :probability-fn probability-fn)]
+                         with-fns (assoc agg
+                                         :quantity-fn
+                                         quantity-fn
+                                         :probability-fn
+                                         probability-fn
+                                         :foreach-keys
+                                         foreach-keys
+                                         :foreach-fns
+                                         foreach-fns)]
                      with-fns))))
              data
              (:model data)))
 
 (defn generators
   [config dependencies]
-  (let [models (:models config)
+  (let [new-config (add-pool config)
+        models (:models config)
         ;; _ (println models)
         new-models (reduce-kv (fn [m table data]
-                                (let [fn-list (build-model-generator config table data dependencies)
+                                (let [fn-list (build-model-generator new-config table data dependencies)
                                       added-association-data (association-data data)
                                       new-data (assoc added-association-data :fn-list fn-list)]
                                   (assoc m table new-data)))
                               models
                               models)]
-    (assoc config :models new-models)))
+    (assoc new-config :models new-models)))
 
 

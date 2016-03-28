@@ -53,7 +53,19 @@
   (if-not (= "association" (:type fdata))
     agg
     (cond
-      (:master fdata) (update agg :source #(conj % (-> fdata :master :model keyword)))
+      (:master fdata) (let [with-master (update agg :source #(conj % (-> fdata :master :model keyword)))
+                            foreach (-> fdata :master :foreach)
+                            foreach-models (when foreach
+                                             (if (instance? clojure.lang.IPersistentMap foreach)
+                                               #{(-> foreach :model keyword)}
+                                               (reduce (fn [models fmap]
+                                                         (conj models (-> fmap :model keyword)))
+                                                       #{}
+                                                       foreach)))]
+                        (if-not foreach
+                          with-master
+                          ;; (update with-master :select #(conj % (-> foreach :model keyword)))
+                          (update with-master :select #(clojure.set/union % foreach-models))))
       :select (update agg :select #(conj % (-> fdata :value :model keyword))))))
 
 (defn table-deps
@@ -64,50 +76,53 @@
                                 {:table-dep (reduce-kv field-deps
                                                        {:select #{} :source #{}}
                                                        (:model data))})
-        _ (println "TABLE DEPS" added-table-deps)
+        ;; _ (println "TABLE DEPS" added-table-deps)
         intra-table (reduce-kv intra-deps {} (:model data))
-        intra-table-associations (assoc-in added-table-deps
-                                            [table :field-deps]
-                                            (reduce-kv
-                                             (fn [m field fset]
-                                               (let [new-fset (reduce
-                                                               (fn [depset value]
-                                                                 (if (keyword? value)
-                                                                   (conj depset value)
-                                                                   (let [model (first value)
-                                                                         assoc-field (some (fn [[mfield fdata]]
-                                                                                       (or (and (= (-> fdata
-                                                                                                       :master
-                                                                                                       :model
-                                                                                                       keyword)
-                                                                                                   model)
-                                                                                                mfield)
-                                                                                           (and (= (-> fdata
-                                                                                                       :value
-                                                                                                       :model
-                                                                                                       keyword)
-                                                                                                   model)
-                                                                                                mfield)))
-                                                                                     (:model data))]
-                                                                     (if assoc-field
-                                                                       (conj depset assoc-field)
-                                                                       depset))))
-                                                               #{}
-                                                               fset)]
-                                                 (assoc m field new-fset)))
-                                             {}
-                                             intra-table))]
+        intra-table-associations (assoc-in
+                                  added-table-deps
+                                  [table :field-deps]
+                                  (reduce-kv
+                                   (fn [m field fset]
+                                     (let [new-fset (reduce
+                                                     (fn [depset value]
+                                                       (if (keyword? value)
+                                                         (conj depset value)
+                                                         (let [model (first value)
+                                                               assoc-field (some (fn [[mfield fdata]]
+                                                                                   (or (and (= (-> fdata
+                                                                                                   :master
+                                                                                                   :model
+                                                                                                   keyword)
+                                                                                               model)
+                                                                                            (not= field mfield)
+                                                                                            mfield)
+                                                                                       (and (= (-> fdata
+                                                                                                   :value
+                                                                                                   :model
+                                                                                                   keyword)
+                                                                                               model)
+                                                                                            (not= field mfield)
+                                                                                            mfield)))
+                                                                                 (:model data))]
+                                                           (if assoc-field
+                                                             (conj depset assoc-field)
+                                                             depset))))
+                                                     #{}
+                                                     fset)]
+                                       (assoc m field new-fset)))
+                                   {}
+                                   intra-table))]
     intra-table-associations))
 
 (defn chan-setup
   [dependencies]
-  (println "DEPS" dependencies)
+  ;; (println "DEPS" dependencies)
   (let [sources (->> dependencies
                      (map second)
                      (map :table-dep)
                      (map :source)
                      (apply clojure.set/union))
-        _ (println "ALL SOURCES" sources)
+        ;; _ (println "ALL SOURCES" sources)
         added-src (reduce-kv (fn [m table deps]
                                (if (sources table)
                                  (let [src-chan (chan 100)
@@ -137,6 +152,6 @@
 
 (defn resolve-deps
   [config]
-  (println "MODELS" (keys (:models config)))
+  ;; (println "MODELS" (keys (:models config)))
   (let [dependencies (reduce-kv table-deps {} (:models config))]
     (chan-setup dependencies)))
