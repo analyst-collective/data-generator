@@ -1,0 +1,471 @@
+{
+  "database": {
+    "user": "samprotas",
+    "dbtype": "postgresql",
+    "dbname": "data_generator",
+    "host": "localhost",
+    "port": 5432
+  },
+  "models": {
+    "mixpanel_event_types": {
+      "model": {
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "master": {
+            "count": 25
+          },
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "name": {
+          "type": "string",
+          "value": {
+            "type": "case",
+            "check": "x >= 5",
+            "branches": {
+              "false": {
+                "type": "case",
+                "check": "x",
+                "branches": {
+                  "0.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_1": 1
+                    }
+                  },
+                  "1.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_2": 1
+                    }
+                  },
+                  "2.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_3": 1
+                    }
+                  },
+                  "3.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_4": 1
+                    }
+                  },
+                  "4.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_5": 1
+                    }
+                  }
+                }
+              },
+              "true": {
+                "type": "faker",
+                "function": "company.bs"
+              }
+            }
+          }
+        }
+      }
+    },
+    "mixpanel_funnel_buckets": {
+      "model": {
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "master": {
+            "count": 365
+          },
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "size": {
+          "type": "integer",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "5 * 1.0025 ^ x",
+              "randomness": 0.2
+            }
+          }
+        },
+        "created": {
+          "type": "datetime",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "1301344212000 + x * 86400000"
+            }
+          }
+        }
+      }
+    },
+    "mixpanel_engage": {
+      "model": {
+        "bucket": {
+          "type": "association",
+          "virtual": true,
+          "master": {
+            "model": "mixpanel_funnel_buckets",
+            "quantity": {
+              "type": "enum",
+              "weights": {
+                "$mixpanel_funnel_buckets.size": 1
+              }
+            }
+          }
+        },
+        "mp_reserved_distinct_id": {
+          "type": "string",
+          "primarykey": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "create_offset": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0,
+              "max": 86400000
+            }
+          }
+        },
+        "mp_reserved_created": {
+          "type": "datetime",
+          "value": {
+            "type": "formula",
+            "properties": {
+              "equation": "$$self.create_offset + $mixpanel_funnel_buckets.created"
+            }
+          }
+        },
+        "step_reached": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "enum",
+            "weights": {
+              "1": 10,
+              "2": 5,
+              "3": 3,
+              "4": 2,
+              "5": 1
+            }
+          }
+        },
+        "other_event_count": {
+          "type": "integer",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 5,
+              "max": 40
+            }
+          }
+        },
+        "mp_reserved_first_name": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "name.first-name"
+          }
+        },
+        "mp_reserved_last_name": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "name.last-name"
+          }
+        },
+        "mp_reserved_name": {
+          "type": "string",
+          "value": {
+            "type": "concat",
+            "properties": {
+              "values": ["$$self.mp_reserved_first_name", " ", "$$self.mp_reserved_last_name"]
+            }
+          }
+        },
+        "mp_reserved_email": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "internet.email",
+            "args": ["$$self.mp_reserved_name"]
+          }
+        },
+        "mp_reserved_os": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "Mac OS X": 2,
+              "iOS": 5,
+              "Android OS": 7
+            }
+          }
+        }
+      }
+    },
+    "mixpanel_events": {
+      "model": {
+        "distinct_id": {
+          "type": "string",
+          "primarykey": true,
+          "value": {
+            "type": "uuid"
+          }
+        },
+        "user_id": {
+          "type": "association",
+          "master": {
+            "model": "mixpanel_engage",
+            "quantity": {
+              "type": "formula",
+              "properties": {
+                "equation": "$mixpanel_engage.step_reached + $mixpanel_engage.other_event_count"
+              }
+            }
+          }
+        },
+        "event_type": {
+          "type": "association",
+          "virtual": true,
+          "value": {
+            "model": "mixpanel_event_types",
+            "filter": "$mixpanel_event_types.id > 5"
+          }
+        },
+        "event": {
+          "type": "string",
+          "value": {
+            "type": "case",
+            "check": "y < $mixpanel_engage.step_reached",
+            "branches": {
+              "true": {
+                "type": "case",
+                "check": "y",
+                "branches": {
+                  "0.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_1": 1
+                    }
+                  },
+                  "1.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_2": 1
+                    }
+                  },
+                  "2.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_3": 1
+                    }
+                  },
+                  "3.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_4": 1
+                    }
+                  },
+                  "4.0": {
+                    "type": "enum",
+                    "weights": {
+                      "event_5": 1
+                    }
+                  }
+                }
+              },
+              "false": {
+                "type": "enum",
+                "weights": {
+                  "$mixpanel_event_types.name": 1
+                }
+              }
+            }
+          }
+        },
+        "mp_reserved_current_url": {
+          "type": "string",
+          "value": {
+            "type": "faker",
+            "function": "internet.domain-name"
+          }
+        },
+        "mp_reserved_os": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$mixpanel_engage.mp_reserved_os": 1
+            }
+          }
+        },
+        "mp_reserved_screen_width": {
+          "type": "integer",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "1920": 1
+            }
+          }
+        },
+        "mp_reserved_lib_version": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "2.7.2": 1
+            }
+          }
+        },
+        "mp_reserved_region": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "Pennsylvania": 1
+            }
+          }
+        },
+        "mp_reserved_browser": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "Chrome": 1
+            }
+          }
+        },
+        "mp_reserved_initial_referring_domain": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$$self.mp_reserved_current_url": 1
+            }
+          }
+        },
+        "mp_reserved_screen_height": {
+          "type": "integer",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "1080": 1
+            }
+          }
+        },
+        "same_day_odds": {
+          "type": "double",
+          "virtual": true,
+          "value": {
+            "type": "range",
+            "properties": {
+              "min": 0,
+              "max": 1
+            }
+          }
+        },
+        "time_offset": {
+          "type": "bigint",
+          "virtual": true,
+          "value": {
+            "type": "case",
+            "check": "$$self.same_day_odds < 0.75",
+            "branches": {
+              "true": {
+                "type": "distribution",
+                "properties": {
+                  "type": "exponential-distribution",
+                  "args": [0.00001925408333]
+                }
+              },
+              "false": {
+                "type": "distribution",
+                "properties": {
+                  "type": "exponential-distribution",
+                  "args": [0.000000001337089]
+                }
+              }
+            }
+          }
+        },
+        "time": {
+          "type": "bigint",
+          "value": {
+            "type": "case",
+            "check": "y == 0",
+            "branches": {
+              "true": {
+                "type": "enum",
+                "weights": {
+                  "$mixpanel_engage.mp_reserved_created": 1
+                }
+              },
+              "false": {
+                "type": "formula",
+                "properties": {
+                  "equation": "$$self.time_offset + $$mult$mixpanel_events$(y - 1).time"
+                }
+              }
+            }
+          }
+        },
+        "mp_reserved_initial_referrer": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$$self.mp_reserved_initial_referring_domain": 1
+            }
+          }
+        },
+        "mp_reserved_browser_version": {
+          "type": "integer",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "46": 1
+            }
+          }
+        },
+        "mp_lib": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "web": 1
+            }
+          }
+        },
+        "mp_country_code": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "US": 1
+            }
+          }
+        },
+        "mp_reserved_city": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "Philadelphia": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
