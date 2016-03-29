@@ -388,12 +388,7 @@
         split (s/split ns-and-function #"\.")
         ns (str "faker." (first split))
         func (second split)
-        resolved (resolve (symbol ns func))
-        ;; args (:args value)
-        ;; real-fn (if-not (seq args)
-        ;;           resolved
-        ;;           (apply partial (cons resolved args)))
-        ]
+        resolved (resolve (symbol ns func))]
     (fn gf_faker [mkey this model & more]
       (try
         (let [args (:args value)
