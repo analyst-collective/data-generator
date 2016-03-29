@@ -367,7 +367,7 @@
                                    diff (-' maximum minimum)]
                                {:this (assoc this mkey  (-> diff rand float (+ minimum)))
                                 :models model}))
-      (#{:double} type-norm) (fn gf_range [mkey this model & more]
+      (#{:double-precision} type-norm) (fn gf_range [mkey this model & more]
                                ;; (println mkey value)
                                (let [maximum (resolve-references maximum this model)
                                      minimum (resolve-references minimum this model)
@@ -388,15 +388,18 @@
         split (s/split ns-and-function #"\.")
         ns (str "faker." (first split))
         func (second split)
-        resolved (resolve (symbol ns func))
-        args (:args value)
-        real-fn (if-not (seq args)
-                  resolved
-                  (apply partial (cons resolved args)))]
+        resolved (resolve (symbol ns func))]
     (fn gf_faker [mkey this model & more]
       (try
-        {:this (assoc this mkey (real-fn))
-         :models model}
+        (let [args (:args value)
+              resolved-args (map #(resolve-references % this model) (or args []))
+              real-fn (if-not (seq resolved-args)
+                        resolved
+                        (apply partial (cons resolved resolved-args)))]
+          {:this (assoc this
+                        mkey
+                        (real-fn))
+           :models model})
         (catch Exception e (do (println "Faker error" mkey this model)
                                (throw e)))))))
 
