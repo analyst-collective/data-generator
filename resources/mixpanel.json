@@ -216,14 +216,14 @@
     },
     "mixpanel_events": {
       "model": {
-        "distinct_id": {
+        "_rjm_record_hash": {
           "type": "string",
           "primarykey": true,
           "value": {
             "type": "uuid"
           }
         },
-        "user_id": {
+        "distinct_id": {
           "type": "association",
           "master": {
             "model": "mixpanel_engage",
@@ -406,15 +406,15 @@
             "check": "y == 0",
             "branches": {
               "true": {
-                "type": "enum",
-                "weights": {
-                  "$mixpanel_engage.mp_reserved_created": 1
+                "type": "formula",
+                "properties": {
+                  "equation": "$mixpanel_engage.mp_reserved_created / 1000"
                 }
               },
               "false": {
                 "type": "formula",
                 "properties": {
-                  "equation": "$$self.time_offset + $$mult$mixpanel_events$(y - 1).time"
+                  "equation": "$$self.time_offset / 1000 + $$mult$mixpanel_events$(y - 1).time"
                 }
               }
             }

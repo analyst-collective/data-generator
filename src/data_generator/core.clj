@@ -3,8 +3,6 @@
             [cheshire.core :as json]
             [data-generator.schema :as schema]
             [clojure.string :as s]
-            [incanter.distributions :as id] ;; functions are resovled in this namespace
-            [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
             [data-generator.config :as conf]
             [data-generator.dependency-resolution :as dep]
             [data-generator.generator-factory :as build]
@@ -13,7 +11,8 @@
 
 (defn generate-data
   [config]
-  (println "here")
+  (require '[incanter.core :refer [$=]]) ; Dynamically resolved symbols require these references
+  (require '[incanter.distributions :as id]) 
   (let [config-prepped (-> config
                            conf/association-field-transfer
                            conf/normalize-models)
@@ -30,8 +29,10 @@
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (let [file-name (or (-> args first) "config.json")
+  (let [start (System/currentTimeMillis)
+        file-name (or (-> args first) "config.json")
         config (conf/load-json file-name)]
     (if-not config
       (println file-name "not found. Exiting without running. Please supply a valid path to a config file.")
-      (generate-data config))))
+      (generate-data config))
+    (println "Completed running in" (- (System/currentTimeMillis) start) "milliseconds.")))
