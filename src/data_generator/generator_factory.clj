@@ -162,16 +162,19 @@
                            (str primitive-value))]
            (if (#{:text} ftype) ;; edn/read-string errors on strings that start with a digit
              str-value
-             (let [read-value (edn/read-string str-value)]
-               (cond
-                 (#{:integer :serial} ftype) (int read-value)
-                 (#{:bigserial :bigint} ftype) (bigint read-value)
-                 (#{:boolean} ftype) (if read-value
-                                       true
-                                       false)
-                 (#{:real} ftype) (float read-value)
-                 (#{:double} ftype) (double read-value)
-                 (#{:date :datetime :timestamp-with-time-zone} ftype) (c/from-long (long read-value)))))))
+             (if (#{:date :datetime :timestamp-with-time-zone} ftype)
+               (if (re-find #"^\d+$" str-value)
+                 (c/from-long (-> str-value edn/read-string long))
+                 (c/from-string str-value))
+               (let [read-value (edn/read-string str-value)]
+                 (cond
+                   (#{:integer :serial} ftype) (int read-value)
+                   (#{:bigserial :bigint} ftype) (bigint read-value)
+                   (#{:boolean} ftype) (if read-value
+                                         true
+                                         false)
+                   (#{:real} ftype) (float read-value)
+                   (#{:double :double-precision} ftype) (double read-value)))))))
        (catch Exception e (do (println "COERCE ERROR" value (class value) ftype)
                               (throw e)))))
 
@@ -357,21 +360,21 @@
                                         ;; (println "RANGE TEST" mkey this model maximum minimum)
                                         (let [maximum (resolve-references maximum this model)
                                               minimum (resolve-references minimum this model)
-                                              diff (-' maximum minimum)]
+                                              diff (- maximum minimum)]
                                           {:this (assoc this mkey (-> diff rand int (+ minimum)))
                                            :models model})) 
       (#{:real} type-norm) (fn gf_range [mkey this model & more]
                              ;; (println mkey value)
                              (let [maximum (resolve-references maximum this model)
                                    minimum (resolve-references minimum this model)
-                                   diff (-' maximum minimum)]
+                                   diff (- maximum minimum)]
                                {:this (assoc this mkey  (-> diff rand float (+ minimum)))
                                 :models model}))
       (#{:double-precision} type-norm) (fn gf_range [mkey this model & more]
                                ;; (println mkey value)
                                (let [maximum (resolve-references maximum this model)
                                      minimum (resolve-references minimum this model)
-                                     diff (-' maximum minimum)]
+                                     diff (- maximum minimum)]
                                  {:this (assoc this mkey (-> diff rand (+ minimum)))
                                   :models model}))
       (#{:timestamp-with-time-zone} type-norm) (fn gf_range [mkey this model & more]
