@@ -172,6 +172,17 @@
       (is (instance? java.lang.Long result-val)) ; Internally we work with longs for formula field purposes
       (is (and (>= result-val 0) (< result-val 10))))))
 
+(deftest field-data*-faker
+  (let [function (field-data* {:type "faker"
+                               :function "internet.email"
+                               :args ["$$self.name"]}
+                              :text)
+        results (function :key {:name "Mickey Mouse"} {})
+        result-val (-> results :this :key)]
+    (is (instance? java.lang.String result-val))
+    (is (re-find #"(?i)mickey" result-val))
+    (is (nil? (re-find #"(?i)\$\$self" result-val)))))
+
 (deftest coerce-test
   (testing "nil-to-anything"
     (is (nil? (coerce nil :serial)))
