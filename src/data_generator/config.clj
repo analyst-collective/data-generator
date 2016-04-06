@@ -51,7 +51,10 @@
                                     vtype (-> fdata :value :type)
                                     autoincrement? (when vtype
                                                      (-> vtype s/lower-case (= "autoincrement")))
-                                    type-norm (or (:type-norm fdata) (normalize ftype autoincrement?))]
+                                    type-norm (or (:type-norm fdata) (try (normalize ftype autoincrement?)
+                                                                          (catch Exception e (do
+                                                                                               (println "NORMALIZE FIELD ERROR" field fdata)
+                                                                                               (throw e)))))]
                                 [field (assoc fdata :type-norm type-norm)]))
                             model))}]))
 

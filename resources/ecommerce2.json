@@ -1,0 +1,56 @@
+{
+  "database": {
+    "user": "samprotas",
+    "dbtype": "postgresql",
+    "dbname": "data_generator",
+    "host": "localhost",
+    "port": 5432
+  },
+  "models": {
+    "sales_flat_order": {
+      "model": {
+        "id": {
+          "type": "integer",
+          "primarykey": true,
+          "master": {
+            "type": "remote-query",
+            "model": "query_seeds",
+            "query": "select * from (select customer, \"type\", createdat from direct_orders UNION ALL select customer, \"type\", createdat from email_orders) as temp order by createdat;"
+          },
+          "value": {
+            "type": "autoincrement"
+          }
+        },
+        "customer_id": {
+          "type": "string",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$query_seeds.customer": 1
+            }
+          }
+        },
+        "type": {
+          "type": "string",
+          "virtual": true,
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$query_seeds.type": 1
+            }
+          }
+        },
+        "created_at": {
+          "type": "datetime",
+          "value": {
+            "type": "enum",
+            "weights": {
+              "$query_seeds.createdat": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
+    
