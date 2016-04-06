@@ -139,7 +139,7 @@
                                                                    added-done-chan
                                                                    (let [src-sub (chan 100)
                                                                          src-mult (-> m source :src-mult)
-                                                                         _ (println "TAP" table source deps)
+                                                                         ;; _ (println "TAP" table source deps)
                                                                          tapped (tap src-mult src-sub)
                                                                          with-source (assoc added-done-chan
                                                                                             :src-sub

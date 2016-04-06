@@ -16,9 +16,9 @@
   (let [config-prepped (-> config
                            conf/association-field-transfer
                            conf/normalize-models)
-        dependencies (dep/resolve-deps config-prepped)
-        _ (schema/create-tables config-prepped)
-        _ (println "DEPENDENCIES" dependencies)]
+        dependencies (dep/resolve-deps config-prepped)]
+    (schema/create-tables config-prepped)
+    (println "DEPENDENCIES" dependencies)
     (println "PREPPED CONFIG" config-prepped)
     (-> config-prepped
         (build/generators dependencies)

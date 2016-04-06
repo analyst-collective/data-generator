@@ -49,6 +49,7 @@
 (defn create-tables
   [config]
   (let [models (just-models config)
+        _ (println "MODELS" (keys models))
         db-spec (:database config)]
     (-> models
         create-format

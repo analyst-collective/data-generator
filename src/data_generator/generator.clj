@@ -6,6 +6,7 @@
             [clj-time.jdbc] ; For defaulting to joda objects when using jdbc via protol extension
             [incanter.distributions :as id] ;; functions are resovled in this namespace
             [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
+            [taoensso.timbre :as timbre :refer [info error]]
             [clojure.math.combinatorics :as combo]
             [clojure.core.async :as a :refer [<!! <! >!! >! chan close! thread]]))
 
@@ -16,7 +17,8 @@
   [insert-ch]
   (let [function (<!! insert-ch)]
     (if-not function
-      (println "INSERTER SHUTTING DOWN")
+      (info "INSERTER SHUTTING DOWN")
+      ;; (println "INSERTER SHUTTING DOWN")
       (do
         (function)
         (recur insert-ch)))))
@@ -29,7 +31,6 @@
 
 (defn date->long
   [value]
-  ;; (println "datetolong" value (class value))
   (if (#{java.util.Date org.joda.time.DateTime} (class value))
     (to-long value)
     value))
@@ -96,7 +97,8 @@
         src-pub (-> dependencies table :src-pub)]
     (if-not iteration
       (do
-        (println table "iteration done, closing insert channel")
+        (info table "iteration done, closing insert channel")
+        ;; (println table "iteration done, closing insert channel")
         (close! insert-ch))
       (let [item (run-fns config fn-list {} {:iteration iteration})
             skip? (->> item vals (some #{:none}))] ;; Select association returned nothing
@@ -107,11 +109,14 @@
 (defn signal-model-complete
   [table listen-ch signal-ch pub-ch]
   (let [value (<!! listen-ch)]
-    (println table "shutdown signal recieved" value)
+    ;; (println table "shutdown signal recieved" value)
+    (info table "shutdown signal recieved" value)
     (if (nil? value)
       (do
-        (println table "DONE INSERTING!")
-        (println "If exists, shutting down" pub-ch)
+        ;; (println table "DONE INSERTING!")
+        ;; (println "If exists, shutting down" pub-ch)
+        (info table "DONE INSERTING!")
+        (info "If exists, shutting down" pub-ch)
         (when pub-ch
           (close! pub-ch))
         (close! signal-ch))
@@ -124,13 +129,18 @@
           data (-> config :models table)
           new-context (assoc context :sequence n)
           item (run-fns config fn-list models new-context)
-          new-models (update models table #(into [] (conj % item)))
+          new-models (update models table #(into [] (conj % (reduce-kv (fn [m k v]
+                                                                         (assoc m k (date->long v)))
+                                                                       item
+                                                                       item))))
           probability-fn (-> config :models table :probability-fn)
           create? (-> probability-fn (apply (list* :create? {} new-models context)) :this :create?)
           skip? (->> item vals (some #{:none}))]
-      (when-not (or skip? (not create?))
+      (if-not (or skip? (not create?))
         (let [iteration (:iteration new-context)]
-          (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub))))
+          (>!! insert-ch #(insert config table (coerce-dates item data) item iteration src-pub)))
+        ;; (println "SKIPPING FROM SOURCE" table skip? create?)
+        (info "SKIPPING FROM SOURCE" table skip? create?))
       (recur config table new-models insert-ch src-pub new-context (rest seq-range)))))
 
 (defn calculate-quantity
@@ -148,16 +158,8 @@
   (when-let [permutation (first permutations)]
     (let [foreach-keys (-> config :models table :foreach-keys)
           foreach-zipped (clojure.walk/prewalk date->long (zipmap foreach-keys permutation))
-          ;; _ (println "FOREACH ZIPPED" foreach-zipped)
-          ;; models (assoc foreach-zipped src-table src-item)
           new-models (merge foreach-zipped models)
-          quantity (calculate-quantity config table models {:iteration iteration})
-          ;; quantity-fn (-> config :models table :quantity-fn)
-          ;; quantity (-> (quantity-fn :quantity {} models :iteration iteration)
-                       ;; :this
-                       ;; :quantity)
-          ;; rounded  (Math/round (double quantity))
-          ]
+          quantity (calculate-quantity config table models {:iteration iteration})]
       (generate-model-from-source-helper config
                                          table
                                          ;; src-item
@@ -174,7 +176,8 @@
         src-pub (-> dependencies table :src-pub)]
     (if-not src-item
       (do
-        (println table "recieved a nil! Closing insert channel")
+        (info table "recieved a nil! Closing insert channel")
+        ;; (println table "recieved a nil! Closing insert channel")
         (close! insert-ch))
       (let [foreach-fns (-> config :models table :foreach-fns)]
         (if (seq foreach-fns)
@@ -202,17 +205,40 @@
                                                (range quantity))))
         (recur config dependencies table src-table src-ch insert-ch)))))
 
+(defn generate-model-from-query-helper
+  [config dependencies table src-table src-seq insert-ch]
+  (let [src-item (first src-seq)
+        fn-list (-> config :models table :fn-list)
+        data (-> config :models table)
+        src-pub (-> dependencies table :src-pub)]
+    (if-not src-item
+      (do
+        (info table "Done processing query! Closing insert channel")
+        (close! insert-ch))
+      (let [quantity (calculate-quantity config table {src-table src-item} {})]
+        ;; (info src-table src-item)
+        (generate-model-from-source-helper config
+                                           table
+                                           {src-table src-item}
+                                           insert-ch
+                                           src-pub
+                                           {:quantity quantity}
+                                           (range quantity))
+        (recur config dependencies table src-table (rest src-seq) insert-ch)))))
+
 (defn generate-model
   [config dependencies table]
-  (let [insert-ch (chan 1000)
-        
+  (let [insert-ch (chan 100 #_1000)
         done-ch (-> dependencies table :done-chan)
         src-sub (-> dependencies table :src-sub)
         src-pub (-> dependencies table :src-pub)
-        dependency-chans (->> dependencies table  :table-dep :select (map #(-> dependencies
-                                                                               %
-                                                                               :done-chan)))
-        _ (println "DEP CHANS" dependency-chans)
+        dependency-chans (->> dependencies
+                              table
+                              :table-dep
+                              :select
+                              (map #(-> dependencies
+                                        %
+                                        :done-chan)))
         start-chan (try (if (seq dependency-chans)
                           (a/merge dependency-chans 100) ;; Add buffer so models can close for sure 
                           (let [dummy-chan (chan)]
@@ -224,37 +250,57 @@
         inserting-done-ch (launch-inserters insert-ch 10)]
     (if src-sub
       (let [src-table (-> dependencies table :table-dep :source first)]
-        (println "Launching" table "with channel source")
+        ;; (println "Launching" table "with channel source")
+        (info "Launching" table "with channel source")
         (generate-model-from-source* config dependencies table src-table src-sub insert-ch)
-        (println "Should be soon closeing src-pub of" table)
-        (signal-model-complete table inserting-done-ch done-ch src-pub))
+        ;; (println "Should be soon closeing src-pub of" table)
+        (info "Should be soon closing src-pub of" table)
+        (signal-model-complete table inserting-done-ch done-ch src-pub)
+        true)
       (let [master (reduce-kv (fn [m field fdata]
                                 (if (:master fdata)
                                   (merge m (:master fdata))
                                   m))
                               {}
-                              (-> config :models table :model))
-            _ (println "GM" table (:count master))]
-        (println "Launching" table "with iteration. Count:" (:count master))
-        (generate-model* config dependencies table (range (:count master)) insert-ch)
-        (println "Should be soon closeing src-pub of" table)
-        (signal-model-complete table inserting-done-ch done-ch src-pub)
-        true)))) ; Mark model done (when run via clojure.async.core/thread without returning nil
+                              (-> config :models table :model))]
+        (if (:query master)
+          (let [database (or (:database master)
+                             {:datasource (:pool config)})]
+            (info "Launching" table "from query. " (:query master))
+            (generate-model-from-query-helper config
+                                              dependencies
+                                              table
+                                              (-> master :model keyword)
+                                              (j/with-db-connection [conn database]
+                                                (j/query conn [(:query master)]))
+                                              insert-ch)
+            (info "Should be soon closing src-pub of" table)
+            (signal-model-complete table inserting-done-ch done-ch src-pub)
+            true)
+          (do
+            ;; (println "Launching" table "with iteration. Count:" (:count master))
+            (info "Launching" table "with iteration. Count:" (:count master))
+            (generate-model* config dependencies table (range (:count master)) insert-ch)
+            ;; (println "Should be soon closeing src-pub of" table)
+            (info "Should be soon closing src-pub-of" table)
+            (signal-model-complete table inserting-done-ch done-ch src-pub)
+            true)))))) ; Mark model done (when run via clojure.async.core/thread without returning nil
 
 (defn signal-all-done
   [ch]
   (let [value (<!! ch)]
     (if (nil? value)
-      (println "ALL DONE!")
+      ;; (println "ALL DONE!")
+      (info "ALL DONE!")
       (recur ch))))
 
 (defn generate
   [config dependencies]
-  (println "GENERATENOW" config)
   (let [model-done-chans (map (fn [[table _]]
                                 (thread (generate-model config dependencies table)))
                               (:models config))
-        _ (println "LAUNCHED" (count model-done-chans) "THREADS FOR MODELS")
+        ;; _ (println "LAUNCHED" (count model-done-chans) "THREADS FOR MODELS")
+        _ (info "LAUNCHED" (count model-done-chans) "THREADS FOR MODELS")
         all-done-ch (a/merge model-done-chans)]
     (signal-all-done all-done-ch)
     config))

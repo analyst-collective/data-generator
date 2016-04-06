@@ -522,9 +522,10 @@
                                       filter-prepped (query-filtered table normalized-where #_filter-prepped)
                                       :else (query table))
                     ;; _ (println "STATEMENT" query-statement)
-                    ;; result (first (j/query pool #_database query-statement))
-                    result (first (j/with-db-connection [conn {:datasource pool}]
-                                    (j/query conn query-statement)))
+                    result (try (first (j/with-db-connection [conn {:datasource pool}]
+                                         (j/query conn query-statement)))
+                                (catch Exception e (do (error "STATEMENT FAIL " query-statement)
+                                                       (throw e))))
                     fixed-dates (reduce-kv (fn [m k v]
                                            (assoc m k (date->long v)))
                                          result
@@ -681,8 +682,9 @@
   [data]
   (reduce-kv (fn [agg field fdata]
                (let [field-type (:type fdata)
-                     master-association? (and (= "association" field-type)
-                                             (:master fdata))]
+                     master-association? (and (or (= "association" field-type)
+                                                  (get-in fdata [:master :model]))
+                                              (:master fdata))]
                  (if-not master-association?
                    agg
                    (let [foreach (-> fdata :master :foreach)
@@ -704,22 +706,17 @@
                                           {:this (assoc this mkey (< (rand) probability))
                                            :models model})
                          with-fns (assoc agg
-                                         :quantity-fn
-                                         quantity-fn
-                                         :probability-fn
-                                         probability-fn
-                                         :foreach-keys
-                                         foreach-keys
-                                         :foreach-fns
-                                         foreach-fns)]
+                                         :quantity-fn    quantity-fn
+                                         :probability-fn probability-fn
+                                         :foreach-keys   foreach-keys
+                                         :foreach-fns    foreach-fns)]
                      with-fns))))
              data
              (:model data)))
 
 (defn generators
-  [config dependencies]
+  [{:keys [models] :as config} dependencies]
   (let [new-config (add-pool config)
-        models (:models config)
         ;; _ (println models)
         new-models (reduce-kv (fn [m table data]
                                 (let [fn-list (build-model-generator new-config table data dependencies)
@@ -728,6 +725,7 @@
                                   (assoc m table new-data)))
                               models
                               models)]
-    (assoc new-config :models new-models)))
+    (assoc new-config
+           :models new-models)))
 
 
