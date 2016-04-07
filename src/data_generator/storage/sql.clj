@@ -1,6 +1,6 @@
 (ns data-generator.storage.sql
   (:require [clojure.java.jdbc :as j]
-            [data-generator.storage :refer [execute-query
+            [data-generator.storage :refer [filter->where-criteria
                                             query
                                             query-weighted
                                             query-filtered
@@ -8,7 +8,9 @@
                                             query-all
                                             query-all-filtered
                                             create-tables
-                                            drop-virtual-columns]]
+                                            drop-virtual-columns
+                                            insert
+                                            raw-query]]
             [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql]]))
 
@@ -20,17 +22,15 @@
   [field]
   (-> field name (str "_cumulative") keyword))
 
-(defn filter->where-criteria
-  [[a op b]]
-  (list op a b))
 
-(defmethod execute-query sql-namespaced
+
+(defn execute-query
   [config query]
   (let [pool (get-in config [:storage :pool])]
     (j/with-db-connection [conn {:datasource pool}]
       (j/query conn query))))
 
-(defmethod query sql-namespaced
+(defn query-statement
   [config table-name]
   (sql/sql
    (sql/select
@@ -40,7 +40,12 @@
     (sql/order-by :random_col_for_sorting)
     (sql/limit 1))))
 
-(defmethod query-weighted sql-namespaced
+(defmethod query sql-namespaced
+  [config table-name]
+  (let [statement (query-statement config table-name)]
+    (execute-query config statement)))
+
+(defn query-weighted-statement
   [config table-name weighted-field table-pk-field]
   (let [cumulative (add-cumulative-tag weighted-field)]
     (sql/sql
@@ -65,7 +70,12 @@
                 (sql/order-by cumulative)
                 (sql/limit 1))))))
 
-(defmethod query-filtered sql-namespaced
+(defmethod query-weighted sql-namespaced
+  [config table-name weighted-field table-pk-field]
+  (let [statement (query-weighted-statement config table-name weighted-field table-pk-field)]
+    (execute-query config statement)))
+
+(defn query-filtered-statement
   [config table-name filter-list]
   (sql/sql
    (sql/select
@@ -77,7 +87,12 @@
        (sql/order-by :random_col_for_sorting)
        (sql/limit 1))))
 
-(defmethod query-filtered-weighted sql-namespaced
+(defmethod query-filtered sql-namespaced
+  [config table-name filter-list]
+  (let [statement (query-filtered-statement)]
+    (execute-query config statement)))
+
+(defn query-filtered-weighted-statement
   [config table-name filter-list weighted-field table-pk-field]
   (let [cumulative (add-cumulative-tag weighted-field)
         where-statement (filter->where-criteria filter-list)]
@@ -104,6 +119,19 @@
          (sql/order-by cumulative)
          (sql/limit 1))))))
 
+(defmethod query-filtered-weighted sql-namespaced
+  [config table-name filter-list weighted-field table-pk-field]
+  (let [statement (query-filtered-weighted-statement config table-name filter-list weighted-field table-pk-field)]
+    (execute-query config statement)))
+
+(defn query-all-statement
+  [config table-name]
+  (sql/sql
+   (sql/select
+    ((get-in config [:storage :type]) db)
+    [:*]
+    (sql/from table-name))))
+
 (defmethod query-all sql-namespaced
   [config table-name]
   (sql/sql
@@ -112,13 +140,18 @@
     [:*]
     (sql/from table-name))))
 
-(defmethod query-all-filtered sql-namespaced
+(defn query-all-filtered-statement
   [config table-name filter-list]
   (sql/sql
    (sql/select
     ((get-in config [:storage :type]) db)
     [:*]
     (sql/from table-name) (sql/where filter-list))))
+
+(defmethod query-all-filtered sql-namespaced
+  [config table-name filter-list]
+  (let [statement (query-all-filtered-statement config table-name filter-list)]
+    (execute-query config statement)))
 
 (defn add-pk
   [col-spec fdata]
@@ -146,8 +179,8 @@
                    (:models config))))
 
 (defn run-commands
-  [config db-spec formatted]
-  (j/with-db-connection [conn db-spec]
+  [config formatted]
+  (j/with-db-connection [conn (get-in config [:storage :spec])]
     (doseq [[table cols] formatted]
       (let [drop-statement (sql/sql (sql/drop-table ((get-in config [:storage :type]) db)
                                                     [table]
@@ -162,24 +195,22 @@
 
 (defmethod create-tables sql-namespaced
   [config]
-  (let [models (just-models config)
-        _ (println "MODELS" (keys models))
-        db-spec (:database config)]
+  (let [models (just-models config)]
     (->> models
          create-format
-         (run-commands db-spec))))
+         (run-commands config))))
 
 (defmulti drop-col-statement
   "Returns a string with a properly formatted 'DROP COLUMN' statement for the sql implementation"
   {:arglists '([config table-name col-name])}
-  (fn [config]
+  (fn [config _ _]
     (get-in config [:storage :type])))
 
 
 (defmethod drop-virtual-columns sql-namespaced
   [config]
   (let [models (:models config)
-        db-spec (:database config)
+        pool (get-in config [:storage :pool])
         all-statements (reduce-kv (fn [all-statements table data]
                                 (let [model (:model data)
                                       statements (->> model
@@ -191,7 +222,29 @@
                                   (concat all-statements statements)))
                               []
                               models)]
-    (j/with-db-connection [conn db-spec]
+    (j/with-db-connection [conn {:datasource pool}]
       (doseq [statement all-statements]
         (println statement)
         (j/execute! conn statement)))))
+
+(defn insert-statement
+  [config table object]
+  (sql/sql (sql/insert
+               ((get-in config [:storage :type]) db)
+               table
+               []
+             (sql/values [object]))))
+
+(defmethod insert sql-namespaced
+  [config table-name object]
+  (let [pool (get-in config [:storage :pool])
+        statement (insert-statement config table-name object)
+        prepped [(first statement) (rest statement)]]
+    (try (j/with-db-connection [conn {:datasource pool}]
+           (apply j/db-do-prepared-return-keys conn prepped))
+         (catch Exception e (do (println "TROUBLE" prepped)
+                                (throw e))))))
+
+(defmethod raw-query sql-namespaced
+  [config query-string]
+  (execute-query config [query-string]))

@@ -1,17 +1,12 @@
 (ns data-generator.generator
-  (:require [sqlingvo.core :as sql]
-            [sqlingvo.db :refer [postgresql sqlite]]
-            [clojure.java.jdbc :as j]
-            [clj-time.coerce :refer [from-long to-sql-time to-long]]
+  (:require [clj-time.coerce :refer [from-long to-sql-time to-long]]
             [clj-time.jdbc] ; For defaulting to joda objects when using jdbc via protol extension
+            [data-generator.storage :as storage :refer [raw-query]]
             [incanter.distributions :as id] ;; functions are resovled in this namespace
             [incanter.core :refer [$=]] ;; macro is resolved at runtime in this namespace
             [taoensso.timbre :as timbre :refer [info error]]
             [clojure.math.combinatorics :as combo]
             [clojure.core.async :as a :refer [<!! <! >!! >! chan close! thread]]))
-
-(def pg (postgresql))
-(def lite (sqlite))
 
 (defn inserter
   [insert-ch]
@@ -37,14 +32,7 @@
 
 (defn insert
   [config table model orig-model iteration out-chan]
-  (let [db-spec (:pool config)
-        insert-statement (sql/sql (sql/insert pg table []
-                                       (sql/values [model])))
-        prepped [(first insert-statement) (rest insert-statement)]
-        row (try (j/with-db-connection [conn {:datasource db-spec}]
-                   (apply j/db-do-prepared-return-keys conn #_db-spec prepped))
-                 (catch Exception e (do (println "TROUBLE" prepped)
-                                        (throw e))))]
+  (let [row (storage/insert config table model)]
     ;; (println "ROW" row)
     (when out-chan
       (let [fixed-row (reduce-kv (fn [m k v]
@@ -264,15 +252,13 @@
                               {}
                               (-> config :models table :model))]
         (if (:query master)
-          (let [database (or (:database master)
-                             {:datasource (:pool config)})]
+          (do
             (info "Launching" table "from query. " (:query master))
             (generate-model-from-query-helper config
                                               dependencies
                                               table
                                               (-> master :model keyword)
-                                              (j/with-db-connection [conn database]
-                                                (j/query conn [(:query master)]))
+                                              (raw-query config (:query master))
                                               insert-ch)
             (info "Should be soon closing src-pub of" table)
             (signal-model-complete table inserting-done-ch done-ch src-pub)

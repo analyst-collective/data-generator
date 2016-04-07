@@ -5,43 +5,11 @@
             [data-generator.field-generator :refer [coerce-sql
                                                     field-data
                                                     field-data*
-                                                    resolve-references
-                                                    filter->where-criteria]]
-            [data-generator.storage :refer [execute-query
+                                                    resolve-references]]
+            [data-generator.storage :refer [filter->where-criteria
                                             query-all
                                             query-all-filtered]]
-            [taoensso.timbre :as timbre :refer [info warn error]]
-            ;; [clojure.java.jdbc :as j]
-            ;; [hikari-cp.core :as conn-pool]
-            ;; [sqlingvo.core :as sql]
-            ;; [sqlingvo.db :refer [postgresql sqlite]]
-            ))
-
-;; (defn add-pool
-;;   [config]
-;;   (let [database (:database config)
-;;         datasource-config (assoc {}
-;;                                  :username (:user database)
-;;                                  :password (:password database)
-;;                                  :adapter (:dbtype database)
-;;                                  :port-number (:port database)
-;;                                  :database-name (:dbname database)
-;;                                  :server-name (:host database)
-;;                                  :maximum-pool-size 80)
-;;         datasource (conn-pool/make-datasource datasource-config)]
-;;     (assoc config :pool datasource)))
-
-;; (def pg (postgresql))
-
-;; (defn query-all
-;;   [table]
-;;   (sql/sql
-;;    (sql/select pg [:*] (sql/from table))))
-
-;; (defn query-all-filtered
-;;   [table filter-list]
-;;   (sql/sql
-;;    (sql/select pg [:*] (sql/from table) (sql/where filter-list))))
+            [taoensso.timbre :as timbre :refer [info warn error]]))
 
 (defn remove-comparitor
   [[a comparitor b]]
@@ -138,9 +106,8 @@
       (fn foreach-all-fn
         [mkey this models & more]
         (let [other (apply hash-map more)
-              config (:config other)
-              query-statement (query-all config table)]
-          (execute-query (:config other) query-statement)))
+              config (:config other)]
+          (query-all config table)))
       (fn foreach-filter-fn
         [mkey this models & more]
         (let [other (apply hash-map more)
@@ -173,9 +140,8 @@
                                     normalized-where)
               constructed-where (if (< 1 (count constructed-ands))
                                   (list * 'or constructed-ands)
-                                  (first constructed-ands))
-              query-statement (query-all-filtered config table constructed-where)]
-          (execute-query config query-statement))))))
+                                  (first constructed-ands))]
+          (query-all-filtered config table constructed-where))))))
 
 (defn association-data
   "Adds quantifier function and likelyhood funciton"

@@ -19,6 +19,7 @@
   (let [config-prepped (-> config
                            conf/association-field-transfer
                            conf/normalize-models
+                           storage/normalize-storage-type
                            storage/storage-prep)
         dependencies (dep/resolve-deps config-prepped)]
     (storage/create-tables config-prepped)

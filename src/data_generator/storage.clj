@@ -6,16 +6,14 @@
   [config]
   (update-in config [:storage :type] #(keyword "data-generator.storage" %)))
 
+(defn filter->where-criteria
+  [[a op b]]
+  (list op a b))
+
 (defmulti storage-prep
   "Hook for any code that must be run prior to using storage (connection pool setup, etc.)"
   {:arglists '([config])}
   (fn [config]
-    (get-in config [:storage :type])))
-
-(defmulti execute-query
-  "Executes the provided query, returning the response values"
-  {:arglists '([config query])}
-  (fn [config _]
     (get-in config [:storage :type])))
 
 (defmulti query
@@ -67,3 +65,14 @@
   (fn [config]
     (get-in config [:storage :type])))
 
+(defmulti insert
+  "Executes provided insert-statement and returns the result"
+  {:arglists '([config insert-statement])}
+  (fn [config _ _]
+    (get-in config [:storage :type])))
+
+(defmulti raw-query
+  "Executes a raw query-string on the underlying storage layer"
+  {:arglists '([config query-string])}
+  (fn [config _]
+    (get-in config [:storage :type])))
