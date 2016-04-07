@@ -12,7 +12,7 @@
             [sqlingvo.core :as sql]
             [sqlingvo.db :refer [postgresql]]))
 
-(def db {:postgresql (postgresql)})
+(def db {(keyword "data-generator.storage" "postgresql") (postgresql)})
 
 (def sql-namespaced (keyword "data-generator.storage" "sql"))
 
