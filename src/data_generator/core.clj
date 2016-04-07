@@ -1,12 +1,15 @@
 (ns data-generator.core
   (:require [clojure.java.io :as io]
             [cheshire.core :as json]
-            [data-generator.schema :as schema]
+            ;; [data-generator.schema :as schema]
             [clojure.string :as s]
             [data-generator.config :as conf]
             [data-generator.dependency-resolution :as dep]
             [data-generator.generator-factory :as build]
-            [data-generator.generator :as generator])
+            [data-generator.generator :as generator]
+            [data-generator.storage :as storage]
+            [data-generator.storage.sql]
+            [data-generator.storage.postgresql])
   (:gen-class))
 
 (defn generate-data
@@ -15,16 +18,16 @@
   (require '[incanter.distributions :as id]) 
   (let [config-prepped (-> config
                            conf/association-field-transfer
-                           conf/normalize-models)
+                           conf/normalize-models
+                           storage/storage-prep)
         dependencies (dep/resolve-deps config-prepped)]
-    (schema/create-tables config-prepped)
+    (storage/create-tables config-prepped)
     (println "DEPENDENCIES" dependencies)
     (println "PREPPED CONFIG" config-prepped)
     (-> config-prepped
         (build/generators dependencies)
         (generator/generate dependencies)
-        schema/drop-virtual-columns
-        )))
+        storage/drop-virtual-columns)))
 
 (defn -main
   "I don't do a whole lot ... yet."

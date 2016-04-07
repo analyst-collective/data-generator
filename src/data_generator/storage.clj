@@ -2,9 +2,19 @@
 
 (derive ::postgresql ::sql)
 
+(defn normalize-storage-type
+  [config]
+  (update-in config [:storage :type] #(keyword "data-generator.storage" %)))
+
+(defmulti storage-prep
+  "Hook for any code that must be run prior to using storage (connection pool setup, etc.)"
+  {:arglists '([config])}
+  (fn [config]
+    (get-in config [:storage :type])))
+
 (defmulti execute-query
   "Executes the provided query, returning the response values"
-  {:arglists '[config query]}
+  {:arglists '([config query])}
   (fn [config _]
     (get-in config [:storage :type])))
 
