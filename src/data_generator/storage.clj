@@ -1,5 +1,6 @@
-(ns data-generator.storage
-  (:require [data-generator.storage.postgresql :refer :all]))
+(ns data-generator.storage)
+
+(derive ::postgresql ::sql)
 
 (defmulti execute-query
   "Executes the provided query, returning the response values"
@@ -49,8 +50,10 @@
   (fn [config]
     (get-in config [:storage :type])))
 
+
 (defmulti drop-virtual-columns
   "Drops virtual columns from storage so they aren't persisted"
   {:arglists '([config])}
   (fn [config]
     (get-in config [:storage :type])))
+
