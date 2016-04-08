@@ -371,7 +371,7 @@
                                                                                          field)
                                     weight (query-weighted config table weight field)
                                     filter-prepped (query-filtered config table normalized-where)
-                                    :else (query table)))
+                                    :else (query config table)))
                     fixed-dates (reduce-kv (fn [m k v]
                                            (assoc m k (date->long v)))
                                          result
