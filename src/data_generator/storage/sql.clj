@@ -1,4 +1,4 @@
-(ns data-generator.storage.sql
+x(ns data-generator.storage.sql
   (:require [clojure.java.jdbc :as j]
             [data-generator.storage :refer [filter->where-criteria
                                             query
@@ -21,8 +21,6 @@
 (defn add-cumulative-tag
   [field]
   (-> field name (str "_cumulative") keyword))
-
-
 
 (defn execute-query
   [config query]
