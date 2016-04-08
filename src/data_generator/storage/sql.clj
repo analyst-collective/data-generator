@@ -1,4 +1,4 @@
-x(ns data-generator.storage.sql
+(ns data-generator.storage.sql
   (:require [clojure.java.jdbc :as j]
             [data-generator.storage :refer [filter->where-criteria
                                             query

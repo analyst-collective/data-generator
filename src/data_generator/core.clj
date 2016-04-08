@@ -1,7 +1,6 @@
 (ns data-generator.core
   (:require [clojure.java.io :as io]
             [cheshire.core :as json]
-            ;; [data-generator.schema :as schema]
             [clojure.string :as s]
             [data-generator.config :as conf]
             [data-generator.dependency-resolution :as dep]
@@ -31,7 +30,7 @@
         storage/drop-virtual-columns)))
 
 (defn -main
-  "I don't do a whole lot ... yet."
+  "JAR entry point, accepts name of packaged config or file path to external config"
   [& args]
   (let [start (System/currentTimeMillis)
         file-name (or (-> args first) "config.json")
