@@ -87,7 +87,7 @@
 
 (defmethod query-filtered sql-namespaced
   [config table-name filter-list]
-  (let [statement (query-filtered-statement)]
+  (let [statement (query-filtered-statement config table-name filter-list)]
     (execute-query config statement)))
 
 (defn query-filtered-weighted-statement
