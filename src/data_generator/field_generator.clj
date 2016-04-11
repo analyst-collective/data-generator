@@ -2,6 +2,7 @@
   (:require [clj-time.coerce :as c]
             [clojure.edn :as edn]
             [clojure.string :as s]
+            [data-generator.field-modifier :refer [wrap-modifier]]
             [data-generator.storage :refer [query
                                             query-filtered
                                             query-weighted
@@ -322,7 +323,8 @@
   [config fdata]
   (let [type-norm (:type-norm fdata)
         association? (-> fdata :type s/lower-case (= "association"))
-        val-type (-> fdata :value :type)]
+        val-type (-> fdata :value :type)
+        modifier (get-in fdata [:value :modifier])]
     (if association?
       (let [field (-> fdata :value :field keyword)
             table (or (-> fdata :value :model keyword)
@@ -382,4 +384,4 @@
                    :models new-models}
                   {:this (assoc this mkey (field result))
                    :models new-models}))))))
-      (field-data* (:value fdata) type-norm))))
+      (wrap-modifier modifier (field-data* (:value fdata) type-norm)))))

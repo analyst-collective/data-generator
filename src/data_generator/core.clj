@@ -13,6 +13,7 @@
 
 (defn generate-data
   [config]
+  (require '[clj-time.core :as t])
   (require '[incanter.core :refer [$=]]) ; Dynamically resolved symbols require these references
   (require '[incanter.distributions :as id]) 
   (let [config-prepped (-> config
