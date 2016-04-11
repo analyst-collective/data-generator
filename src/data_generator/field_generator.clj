@@ -1,8 +1,11 @@
 (ns data-generator.field-generator
   (:require [clj-time.coerce :as c]
             [clojure.edn :as edn]
-            [clojure.java.jdbc :as j]
             [clojure.string :as s]
+            [data-generator.storage :refer [query
+                                            query-filtered
+                                            query-weighted
+                                            query-filtered-weighted]]
             [incanter.distributions :as id]
             [incanter.core :refer [$=]]
             [faker.address]
@@ -11,91 +14,7 @@
             [faker.lorem]
             [faker.name]
             [faker.phone_number]
-            [sqlingvo.core :as sql]
-            [sqlingvo.db :refer [postgresql sqlite]]
             [taoensso.timbre :as timbre :refer [info warn error]]))
-
-(def pg (postgresql))
-
-(defn add-cumulative-tag
-  [field]
-  (-> field name (str "_cumulative") keyword))
-
-(defn filter->where-criteria
-  [[a op b]]
-  (list op a b))
-
-(defn query-filtered
-  [table filter-list]
-  (sql/sql
-   (sql/select
-       pg
-       [:* (sql/as '(random) :random_col_for_sorting)]
-       (sql/from table)
-                                        ; TODO support OR/AND criteria
-       (sql/where (filter->where-criteria filter-list))
-       (sql/order-by :random_col_for_sorting)
-       (sql/limit 1))))
-
-(defn query-weighted
-  [table weighted-field pk]
-  (let [cumulative (add-cumulative-tag weighted-field)]
-    (sql/sql
-     (sql/with pg [:temp (sql/select pg [:* (sql/as
-                                             `(/ ((over
-                                                   (sum ~weighted-field)
-                                                   (order-by ~pk)))
-                                                 (cast ~(sql/select
-                                                           pg
-                                                           [`(sum ~weighted-field)]
-                                                         (sql/from table)) :float))
-                                             cumulative)] (sql/from table))]
-       (sql/select
-           pg
-           [:*]
-         (sql/from :temp)
-         (sql/where `(> ~cumulative ~(rand)))
-         (sql/order-by cumulative)
-         (sql/limit 1))))))
-
-(defn query-filtered-weighted
-  [table filter-list weighted-field pk]
-  (let [cumulative (add-cumulative-tag weighted-field)
-        ;; _ (println "FILTER LIST" filter-list)
-        where-statement (filter->where-criteria filter-list)]
-    ;; (println "FINAL WHERE STATEMENT" where-statement)
-    ;; (println "FIRST TYPE" (class (first where-statement)))
-    ;; (println "TABLE" table)
-    (sql/sql
-     (sql/with pg [:temp (sql/select
-                             pg
-                             [:* (sql/as
-                                  `(/ ((over
-                                        (sum ~weighted-field)
-                                        (order-by ~pk)))
-                                      (cast ~(sql/select pg [`(sum ~weighted-field)]
-                                              (sql/from table)
-                                              (sql/where where-statement)) :float))
-                                  cumulative)]
-                           (sql/from table)
-                           (sql/where where-statement))]
-       (sql/select
-           pg
-           [:*]
-         (sql/from :temp)
-         (sql/where `(> ~cumulative ~(rand)))
-         (sql/order-by cumulative)
-         (sql/limit 1))))))
-
-(defn query
-  [table]
-  (sql/sql
-   (sql/select
-       pg
-       [:* (sql/as '(random) :random_col_for_sorting)]
-       (sql/from table)
-       (sql/order-by :random_col_for_sorting)
-       (sql/limit 1))))
 
 (defn coerce
   "Coerce keyword into field type.
@@ -401,7 +320,6 @@
 
 (defn field-data
   [config fdata]
-  ;; (println fdata)
   (let [type-norm (:type-norm fdata)
         association? (-> fdata :type s/lower-case (= "association"))
         val-type (-> fdata :value :type)]
@@ -432,7 +350,6 @@
                                               :else %))))
                     filter-field (when filter-prepped
                                    (some #(and (keyword? %) %) filter-prepped))
-                    ;; _ (println "FILTER FIELD" filter-field)
                     filter-type (when filter-field
                                   (-> config :models table :model filter-field :type-norm))
                     other (apply hash-map more)
@@ -440,26 +357,21 @@
                     pool (-> other :config :pool)
                     resolved-where (map #(resolve-references % this model) filter-prepped)
                     primitives-where (map str->primitive resolved-where)
-                    ;; resolved-value (some #(and (number? %) %) primitives-where)
                     resolved-value (let [no-op [(first primitives-where) (last primitives-where)]]
                                      (first (remove keyword? no-op)))
                     normalized-where (try (replace {resolved-value (coerce-sql resolved-value filter-type)}
                                                    primitives-where)
                                           (catch Exception e (do (println "NORMALIZE FILTER ERROR" filter-criteria filter-prepped primitives-where model)
                                                                  (throw e))))
-                    query-statement (cond
-                                      (and weight filter-prepped) (query-filtered-weighted table
-                                                                                           normalized-where
-                                                                                           weight
-                                                                                           field)
-                                      weight (query-weighted table weight field)
-                                      filter-prepped (query-filtered table normalized-where #_filter-prepped)
-                                      :else (query table))
-                    ;; _ (println "STATEMENT" query-statement)
-                    result (try (first (j/with-db-connection [conn {:datasource pool}]
-                                         (j/query conn query-statement)))
-                                (catch Exception e (do (error "STATEMENT FAIL " query-statement)
-                                                       (throw e))))
+                    result (first (cond
+                                    (and weight filter-prepped) (query-filtered-weighted config
+                                                                                         table
+                                                                                         normalized-where
+                                                                                         weight
+                                                                                         field)
+                                    weight (query-weighted config table weight field)
+                                    filter-prepped (query-filtered config table normalized-where)
+                                    :else (query config table)))
                     fixed-dates (reduce-kv (fn [m k v]
                                            (assoc m k (date->long v)))
                                          result
