@@ -93,7 +93,8 @@
 (defn query-filtered-weighted-statement
   [config table-name filter-list weighted-field table-pk-field]
   (let [cumulative (add-cumulative-tag weighted-field)
-        where-statement (filter->where-criteria filter-list)]
+        ;; where-statement (filter->where-criteria filter-list)
+        where-statement filter-list]
     (sql/sql
      (sql/with
       ((get-in config [:storage :type]) db)
@@ -120,7 +121,9 @@
 (defmethod query-filtered-weighted sql-namespaced
   [config table-name filter-list weighted-field table-pk-field]
   (let [statement (query-filtered-weighted-statement config table-name filter-list weighted-field table-pk-field)]
-    (execute-query config statement)))
+    (try (execute-query config statement)
+         (catch Exception e (do (println "FAILED QUERY" statement filter-list weighted-field table-pk-field)
+                                (throw e))))))
 
 (defn query-all-statement
   [config table-name]

@@ -65,6 +65,12 @@
         fixed (apply hash-map (mapcat normalize-fields models))]
     (assoc config :models fixed)))
 
+(defn remote-association-field-type-normalize
+  [type-map]
+  (reduce-kv (fn [m field ftype]
+               (assoc m field (normalize ftype)))
+             {}
+             type-map))
 
 (defn association-field-transfer
   [config]
@@ -75,7 +81,11 @@
                             new-model (reduce-kv
                                        (fn check-fields [m1 field fdata]
                                          (if-not (= "association" (:type fdata))
-                                           (assoc m1 field fdata)
+                                           (if (= "remote-association" (get-in fdata [:value :type]))
+                                             (assoc-in m1
+                                                       [field :value :type-norms]
+                                                       (remote-association-field-type-normalize (get-in fdata [:value :field-types])))
+                                             (assoc m1 field fdata))
                                            (let [data-map (or (:master fdata) (:value fdata))
                                                  associated (-> data-map :model keyword)
                                                  ;; _ (println associated fdata)

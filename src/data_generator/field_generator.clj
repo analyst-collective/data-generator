@@ -3,7 +3,8 @@
             [clojure.edn :as edn]
             [clojure.string :as s]
             [data-generator.field-modifier :refer [wrap-modifier]]
-            [data-generator.storage :refer [query
+            [data-generator.storage :refer [filter->where-criteria
+                                            query
                                             query-filtered
                                             query-weighted
                                             query-filtered-weighted]]
@@ -16,6 +17,10 @@
             [faker.name]
             [faker.phone_number]
             [taoensso.timbre :as timbre :refer [info warn error]]))
+
+(defn remove-comparitor
+  [[a comparitor b]]
+  [a b])
 
 (defn coerce
   "Coerce keyword into field type.
@@ -303,12 +308,11 @@
                               {}
                               (:branches value))]
     (fn gf_case [mkey this model & more]
-      ;; (println mkey value)
       (try (let [evaluated (calculate-formula (:check value) this model more)
                  chosen-fn ((-> evaluated str keyword) result-fns)
                  args (list* mkey this model more)]
              (try (apply chosen-fn args)
-                  (catch Exception e (do (println "CASE ERROR" value evaluated chosen-fn args)
+                  (catch Exception e (do (println "CASE ERROR" value evaluated (-> evaluated str keyword) result-fns chosen-fn args)
                                          (throw e)))))
            (catch Exception e2 (do (println "Case Error" mkey this model)
                                    (throw e2)))))))
@@ -318,6 +322,119 @@
   (if (#{java.util.Date org.joda.time.DateTime} (class value))
     (c/to-long value)
     value))
+
+(defn split-filter
+  [filter-string]
+  (when filter-string
+    (let [filter-criteria-or-split (s/split filter-string #"\s+\|\|\s+")
+          filter-criteria-and-split (map #(s/split % #"\s+&&\s+") filter-criteria-or-split)
+          filter-split (map (fn [and-vectors]
+                              (map #(s/split % #"\s+") and-vectors))
+                            filter-criteria-and-split)]
+      filter-split)))
+
+(defn prep-filter-seq
+  [filter-seq table]
+  (reduce (fn [agg value]
+            (let [pattern (re-pattern
+                           (str "(?:^|\\s|\\()(\\$"
+                                (name table)
+                                "\\.[\\w]+)"))
+                  match (->> value
+                             (re-find pattern)
+                             last)
+                  replacement (when match
+                                (-> match
+                                    (s/split #"\.")
+                                    last
+                                    keyword))]
+              (if replacement
+                (conj agg replacement)
+                (conj agg value))))
+          []
+          filter-seq))
+
+(defn prep-filter
+  [split-filter table]
+  (map (fn [and-vectors]
+         (map #(prep-filter-seq % table) and-vectors))
+       split-filter))
+
+(defn normalize-where
+  [resolved-where type-map]
+  (map (fn [and-vectors]
+         (map (fn [filter-seq]
+                (let [no-operator (remove-comparitor filter-seq)
+                      resolved-value (first (filter (complement keyword?)
+                                                    no-operator))
+                      filter-field (first (filter keyword?
+                                                  no-operator))
+                      filter-type (filter-field type-map)
+                      coerced-value (coerce-sql resolved-value filter-type)
+                      operator-value (second filter-seq)
+                      normalized-seq (into []
+                                           (replace
+                                            {resolved-value coerced-value
+                                             operator-value (symbol operator-value)}
+                                            filter-seq))]
+                  (filter->where-criteria (reverse (into (list) normalized-seq)))))
+              and-vectors))
+       resolved-where))
+
+(defn construct-where
+  [normalized-where]
+  (->> normalized-where
+       (map (fn [and-vectors]
+              (if (< 1 (count and-vectors))
+                (list* 'and and-vectors)
+                (first and-vectors))))
+       (#(if (< 1 (count %))
+            (list* 'or %)
+            (first %)))))
+
+(defmethod field-data* "remote-association"
+  [value type-norm]
+  (let [field (-> value :field keyword)
+        table (-> value :model keyword)
+        filter-criteria (:filter value)
+        filter-split (split-filter filter-criteria)
+        filter-prepped (prep-filter filter-split table)
+        type-map (:type-norms value)
+        weight (-> value :weight keyword)]
+    (fn remote-assoc
+      [mkey this models & more]
+      (let [other (apply hash-map more)
+            config (:config other)
+            constructed-where (when filter-prepped
+                                (-> (clojure.walk/prewalk #(resolve-references % this models) filter-prepped)
+                                    (normalize-where type-map)
+                                    construct-where))
+            result (first (cond
+                            (and weight constructed-where) (query-filtered-weighted config
+                                                                                    table
+                                                                                    constructed-where
+                                                                                    weight
+                                                                                    field)
+                            constructed-where (query-filtered config
+                                                              table
+                                                              constructed-where)
+                            weight (query-weighted config
+                                                   table
+                                                   weight
+                                                   field)
+                            :default (query config table)))
+            _ (when-not result
+                (info "NONE!" table constructed-where weight field))
+            fixed-dates (reduce-kv (fn [m k v]
+                                     (assoc m k (date->long v)))
+                                   result
+                                   result)
+            new-models (assoc models table fixed-dates)]
+        (if-not result
+          {:this (assoc this mkey :none)
+           :models new-models}
+          {:this (assoc this mkey (field result))
+           :models new-models})))))
 
 (defn field-data
   [config fdata]
