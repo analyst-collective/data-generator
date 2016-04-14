@@ -86,7 +86,6 @@
     (if-not iteration
       (do
         (info table "iteration done, closing insert channel")
-        ;; (println table "iteration done, closing insert channel")
         (close! insert-ch))
       (let [item (run-fns config fn-list {} {:iteration iteration})
             skip? (->> item vals (some #{:none}))] ;; Select association returned nothing
@@ -97,12 +96,9 @@
 (defn signal-model-complete
   [table listen-ch signal-ch pub-ch]
   (let [value (<!! listen-ch)]
-    ;; (println table "shutdown signal recieved" value)
     (info table "shutdown signal recieved" value)
     (if (nil? value)
       (do
-        ;; (println table "DONE INSERTING!")
-        ;; (println "If exists, shutting down" pub-ch)
         (info table "DONE INSERTING!")
         (info "If exists, shutting down" pub-ch)
         (when pub-ch
@@ -216,7 +212,7 @@
 
 (defn generate-model
   [config dependencies table]
-  (let [insert-ch (chan 100 #_1000)
+  (let [insert-ch (chan 100)
         done-ch (-> dependencies table :done-chan)
         src-sub (-> dependencies table :src-sub)
         src-pub (-> dependencies table :src-pub)

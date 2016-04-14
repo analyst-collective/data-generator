@@ -72,6 +72,26 @@
              {}
              type-map))
 
+
+(defn normalize-value
+  [value]
+  (if (= "remote-association" (:type value))
+    (assoc value :type-norms (remote-association-field-type-normalize (:field-types value)))
+    (if (= "case" (:type value))
+      (reduce-kv (fn [new-value branch sub-value]
+                   (assoc-in new-value
+                             [:branches branch :type-norms]
+                             (remote-association-field-type-normalize (:field-types sub-value))))
+                 value
+                 (:branches value))
+      value)))
+
+(defn normalize-fdata
+  [fdata]
+  (if (:value fdata)
+    (assoc fdata :value (normalize-value (:value fdata)))
+    fdata))
+
 (defn association-field-transfer
   [config]
   (let [models (:models config)
@@ -81,11 +101,7 @@
                             new-model (reduce-kv
                                        (fn check-fields [m1 field fdata]
                                          (if-not (= "association" (:type fdata))
-                                           (if (= "remote-association" (get-in fdata [:value :type]))
-                                             (assoc-in m1
-                                                       [field :value :type-norms]
-                                                       (remote-association-field-type-normalize (get-in fdata [:value :field-types])))
-                                             (assoc m1 field fdata))
+                                           (assoc m1 field (normalize-fdata fdata))
                                            (let [data-map (or (:master fdata) (:value fdata))
                                                  associated (-> data-map :model keyword)
                                                  ;; _ (println associated fdata)

@@ -19,4 +19,4 @@
 (deftest query-filtered-weighted-statement-test
   (testing "all"
     (is (not (nil? (re-find #"WITH \"temp\" AS \(SELECT \*, \(\"sum\"\(\"popularity\"\) OVER \(ORDER BY \"c_pk\"\) / CAST\(\(SELECT \"sum\"\(\"popularity\"\) FROM \"model_c\" WHERE \(\"created\" > 10\)\) AS float\)\) AS \"popularity_cumulative\" FROM \"model_c\" WHERE \(\"created\" > 10\)\) SELECT \* FROM \"temp\" WHERE \(\"popularity_cumulative\" > [\d]+\.[\d]+\) ORDER BY \"popularity_cumulative\" LIMIT 1"
-                            (first (query-filtered-weighted-statement pg-config :model_c '(:created > 10) :popularity :c_pk))))))))
+                            (first (query-filtered-weighted-statement pg-config :model_c '(> :created 10) :popularity :c_pk))))))))

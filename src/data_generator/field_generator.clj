@@ -50,7 +50,8 @@
                                          true
                                          false)
                    (#{:real} ftype) (float read-value)
-                   (#{:double :double-precision} ftype) (double read-value)))))))
+                   (#{:double :double-precision} ftype) (double read-value)
+                   :else (throw (Exception. (str ftype " is an unsupported type-norm." value)))))))))
        (catch Exception e (do (println "COERCE ERROR" value (class value) ftype)
                               (throw e)))))
 
@@ -65,7 +66,7 @@
   [string]
   (if ((complement instance?) java.lang.String string)
     string ;; not really a string
-    (if-let [number (re-find #"^\d+(?:\.\d+)?$" string)]
+    (if-let [number (re-find #"^\d+(?:\.\d+)?(?:E\d+)?$" string)]
       (Double/parseDouble number)
       (symbol string))))
 
@@ -135,7 +136,7 @@
           calculated (try (if (> (count primitives) 1) ; If there's only 1 primitive, no calculation required
                             (apply (functionize $=) primitives) ; this allows strings to be returned as well
                             (first primitives))
-                          (catch Exception e (do (println "PROBLEM" equation primitives this model)
+                          (catch Exception e (do (error "PROBLEM" equation (into '() primitives) this model)
                                                  (throw e))))]
       calculated)))
 
@@ -160,7 +161,7 @@
               randomized (randomize-value calculated randomness)]
           {:this (assoc this mkey randomized)
            :models model})
-        (catch Exception e (do (println "Formula Error" mkey this model)
+        (catch Exception e (do (error "Formula Error" mkey this model)
                                (throw e)))))))
 
 (defmethod field-data* "distribution"
@@ -424,7 +425,7 @@
                                                    field)
                             :default (query config table)))
             _ (when-not result
-                (info "NONE!" table constructed-where weight field))
+                (info "NONE!" table constructed-where (into '() filter-prepped) weight field))
             fixed-dates (reduce-kv (fn [m k v]
                                      (assoc m k (date->long v)))
                                    result
