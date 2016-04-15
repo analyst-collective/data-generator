@@ -125,7 +125,7 @@
         ;; _ (println "ALL SOURCES" sources)
         added-src (reduce-kv (fn [m table deps]
                                (if (sources table)
-                                 (let [src-chan (chan 100)
+                                 (let [src-chan (chan 300)
                                        src-mult (mult src-chan)
                                        new-deps (assoc deps :src-pub src-chan :src-mult src-mult)]
                                    (assoc m table new-deps))

@@ -3,17 +3,19 @@
             [clojure.string :as s]
             [clojure.edn :as edn]
             [data-generator.field-generator :refer [coerce-sql
+                                                    construct-where
                                                     field-data
                                                     field-data*
-                                                    resolve-references]]
+                                                    normalize-where
+                                                    prep-filter
+                                                    prep-filter-seq
+                                                    remove-comparitor
+                                                    resolve-references
+                                                    split-filter]]
             [data-generator.storage :refer [filter->where-criteria
                                             query-all
                                             query-all-filtered]]
             [taoensso.timbre :as timbre :refer [info warn error]]))
-
-(defn remove-comparitor
-  [[a comparitor b]]
-  [a b])
 
 (defn master-column
   [config data]
@@ -58,43 +60,6 @@
            new-fn-list (conj fn-list new-item)]
        (recur config table new-mdata new-deps new-fn-list)))))
 
-(defn split-filter
-  [filter-string]
-  (when filter-string
-    (let [filter-criteria-or-split (s/split filter-string #"\s+\|\|\s+")
-          filter-criteria-and-split (map #(s/split % #"\s+&&\s+") filter-criteria-or-split)
-          filter-split (map (fn [and-vectors]
-                              (map #(s/split % #"\s+") and-vectors))
-                            filter-criteria-and-split)]
-      filter-split)))
-
-(defn prep-filter-seq
-  [filter-seq table]
-  (reduce (fn [agg value]
-            (let [pattern (re-pattern
-                           (str "(?:^|\\s|\\()(\\$"
-                                (name table)
-                                "\\.[\\w]+)"))
-                  match (->> value
-                             (re-find pattern)
-                             last)
-                  replacement (when match
-                                (-> match
-                                    (s/split #"\.")
-                                    last
-                                    keyword))]
-              (if replacement
-                (conj agg replacement)
-                (conj agg value))))
-          []
-          filter-seq))
-
-(defn prep-filter
-  [split-filter table]
-  (map (fn [and-vectors]
-         (map #(prep-filter-seq % table) and-vectors))
-       split-filter))
-
 (defn foreach-fn-generator
   [foreach]
   (let [table (-> foreach :model keyword)
@@ -115,32 +80,8 @@
               filter-types (map #(-> other :config :models table :model % :type-norm) filter-fields)
               type-map (zipmap filter-fields filter-types)
               resolved-where (clojure.walk/prewalk #(resolve-references % this models) filter-prepped)
-              normalized-where (map (fn [and-vectors]
-                                   (map (fn [filter-seq]
-                                          (let [no-operator (remove-comparitor filter-seq)
-                                                resolved-value (first (filter (complement keyword?)
-                                                                              no-operator))
-                                                filter-field (first (filter keyword?
-                                                                            no-operator))
-                                                filter-type (filter-field type-map)
-                                                coerced-value (coerce-sql resolved-value filter-type)
-                                                operator-value (second filter-seq)
-                                                normalized-seq (into []
-                                                                     (replace
-                                                                      {resolved-value coerced-value
-                                                                       operator-value (symbol operator-value)}
-                                                                      filter-seq))]
-                                            (filter->where-criteria (reverse (into (list) normalized-seq)))))
-                                        and-vectors))
-                                 resolved-where)
-              constructed-ands (map (fn [and-vectors]
-                                      (if (< 1 (count and-vectors))
-                                        (list* 'and and-vectors)
-                                        (first and-vectors)))
-                                    normalized-where)
-              constructed-where (if (< 1 (count constructed-ands))
-                                  (list * 'or constructed-ands)
-                                  (first constructed-ands))]
+              normalized-where (normalize-where resolved-where type-map)
+              constructed-where (construct-where normalized-where)]
           (query-all-filtered config table constructed-where))))))
 
 (defn association-data
