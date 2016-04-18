@@ -1,6 +1,6 @@
 # General
 
-This explains the configurations for generating *values*. Usually this is with regard to *values* for a field, but they're also used for the `quantity` block in `master` blocks ([see here][fields.md]) and elsewhere.
+This explains the configurations for generating *values*. Usually this is with regard to *values* for a field, but they're also used for the `quantity` block in `master` blocks ([see here](fields.md)) and elsewhere.
 
 Field value configurations will be found as the values to the `field_1` and `field_2` keys below:
 
@@ -32,7 +32,7 @@ Field value configurations will be found as the values to the `field_1` and `fie
         }
     }
 
-Another, related topic is *value modifiers*. These are covered in more detail [here][value_modifiers.md].]
+Another, related topic is *value modifiers*. These are covered in more detail [here](value_modifiers.md).
 
 ## Special Field Configs
 
@@ -58,7 +58,7 @@ Sometimes it's helpful to calculate an "intermediary field" on a table that you 
 
 ## Field Value Configs
 
-All `value` block results will be coerced to the `type` specified (integer, text, double-precision, etc.). [See here for info on field types][fields.md]
+All `value` block results will be coerced to the `type` specified (integer, text, double-precision, etc.). [See here for info on field types](fields.md)
 
 
 ### Formulas
@@ -214,7 +214,7 @@ In the above config, `check` is evaluated just like any equation provided in a `
 
 ## References
 
-When generating values, often it's helpful to refer to other values, either within the same row, within an associated model that's used to generate this table ([see here][fields.md]). To accomplish this, special syntax to *reference* these details is used.
+When generating values, often it's helpful to refer to other values, either within the same row, within an associated model that's used to generate this table ([see here](fields.md)). To accomplish this, special syntax to *reference* these details is used.
 
 * Field on this row
 * Field on associated row
@@ -285,7 +285,7 @@ Please note the **TWO** `$` symbols in front of the word `self` (`$$self`). This
         }
     }
 
-In the config above, a row of `model_b` is generated for each row of `model_a` ([see here for more details][fieldsmd]). `field_b2` will be the primary key value of `model_a` for each row generated (a 1:1 association foreign key).
+In the config above, a row of `model_b` is generated for each row of `model_a` ([see here for more details](fieldsmd)). `field_b2` will be the primary key value of `model_a` for each row generated (a 1:1 association foreign key).
 
 By associating these two models, each row of `model_b` has access to *all values* of the associated row in `model_a`. The syntax for referencing these values is shown in the config above and reiterated below:
 
@@ -305,7 +305,7 @@ There are a few more values that can be *referenced* based on special contexts.
 
 #### Counts
 
-If a row is generated with this `master` syntax ([see here for me detail][fields.md]):
+If a row is generated with this `master` syntax ([see here for me detail](fields.md)):
 
     "master": {
         "count": 200
