@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<title>storage.html</title>
+
+</head>
+
+<body>
+
+<h1>Overview</h1>
+
+<p>This section refers to the <strong>storage</strong> key in the general <em>config</em> structure below:</p>
+
+<pre><code>{
+    "storage": {
+        "type": "storage type here",
+        "spec": "storage spec here"
+    },
+    "models": {
+        "model_number_1": {
+            "model": {
+                "field_1": {
+                    "details": "here"
+                },
+                "field_2": {
+                    "details": "here"
+                }
+            }
+        },
+        "model_number_2": {
+            "...": "..."
+        }
+    }
+}
+</code></pre>
+
+<p>Currently, this tool only supports Postgreql as an endpoint for the generated data. See the section below for details.</p>
+
+<h2>Postgresql</h2>
+
+<p>The structure for this endpoint is as follows:</p>
+
+<p><em>Note: This entire object will be included <strong>underneath</strong> the "storage" key.</em></p>
+
+<pre><code>{
+    "type": "postgresql",
+    "spec": {
+        "user": "insert your username here",
+        "password": "insert your password here",
+        "dbtype": "postgresql",
+        "dbname": "insert the name of your database here",
+        "host": "insert your host (possibly localhost) here",
+        "port": "insert your port here (the standard is 5432)"
+    }
+}
+</code></pre>
+
+<p>The <em>password</em> key can be ommitted if your user does not have a password.</p>
+
+</body>
+</html>

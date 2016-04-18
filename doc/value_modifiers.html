@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<title>value_modifiers.html</title>
+
+</head>
+
+<body>
+
+<h1>General</h1>
+
+<p>Modifiers allow you to provide a transformation to a value after it's been generated. These are usually more specific to the field type than field values are.</p>
+
+<p>A modifier configurations can be found in the value config of <code>start_date_month</code>:</p>
+
+<pre><code>{
+    "storage": {
+        "type": "storage type here",
+        "spec": "storage spec here"
+    },
+    "models": {
+        "model_number_1": {
+            "model": {
+                "field_1": {
+                    "type": "integer",
+                    "value": {
+                        "details": "here"
+                    }
+                },
+                "start_date": {...},
+                "start_date_month": {
+                    "type": "integer",
+                    "value": {
+                        "type": "enum",
+                        "weights": {
+                            "$$self.start_date": 1
+                        },
+                        "modifier": {
+                            "format": "time-component",
+                            "function": "month"
+                        }
+                    }
+                }
+            }
+        },
+        "model_number_2": {
+            "...": "..."
+        }
+    }
+}
+</code></pre>
+
+<h2>Modifier Formats</h2>
+
+<h3>Time-Component</h3>
+
+<p>While it's possible to extract components of a timestamp with math in <em>formula</em> fields ([see formula values][field_values.md]) this can be challenging to do accurately as a result of the many idiosyncrasies with time. To faciliate accurate extracting of components, a Clojure library's (clj-time) functions are exposed. [The full API documentation can be found here][http://clj-time.github.io/clj-time/doc/clj-time.core.html#var-DateTimeProtocol]. If a value returns an integer or biginteger, this modifier will coerce the result into a <code>DateTime</code> object and call the specified function on it.</p>
+
+<p>Here's the config for extracting the "day of the week":</p>
+
+<pre><code>"modifier": {
+    "format": "time-component",
+    "function": "day-of-week"
+}
+</code></pre>
+
+<p>Here's the config for extracting the hour:</p>
+
+<pre><code>"modifier": {
+    "format": "time-component",
+    "function": "hour"
+}
+</code></pre>
+
+</body>
+</html>

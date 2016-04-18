@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<title>intro.html</title>
+
+</head>
+
+<body>
+
+<h1>Introduction to data-generator</h1>
+
+<p><strong>data-generator</strong> reads in a <em>config</em> with a specific format and outputs data according to the provided information. The output format can be generalized as an <a href="https://en.wikipedia.org/wiki/Relational_model">relational data model</a>.</p>
+
+<p>This <em>config</em> file specifies several things:</p>
+
+<ul>
+<li>What <strong>tables</strong> of data to produce</li>
+<li>What <strong>columns</strong> each table has</li>
+<li>How to generate a value for a specific table/column/row:
+<ul>
+<li>Can be based on other columns within the row</li>
+<li>Can be based on other rows</li>
+<li>Can be based on other tables</li>
+</ul></li>
+</ul>
+
+<p>The basic structure of a config (shown here as JSON) is as follows:</p>
+
+<pre><code>{
+    "storage": {
+        "type": "storage type here",
+        "spec": "storage spec here"
+    },
+    "models": {
+        "model_number_1": {
+            "model": {
+                "field_1": {
+                    "details": "here"
+                },
+                "field_2": {
+                    "details": "here"
+                }
+            }
+        },
+        "model_number_2": {
+            "...": "..."
+        }
+    }
+}
+</code></pre>
+
+<p>For more details on the <strong>storage</strong> portion of the config, [check out here][storage.md].</p>
+
+<p>For more details on field level details, [check out here][fields.md].</p>
+
+<p>For a full example, check out the <code>/resources</code> folder in this repo.</p>
+
+</body>
+</html>
