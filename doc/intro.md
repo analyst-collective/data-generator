@@ -37,8 +37,8 @@ The basic structure of a config (shown here as JSON) is as follows:
         }
     }
 
-For more details on the **storage** portion of the config, [check out here][storage.md].
+For more details on the **storage** portion of the config, [check out here](storage.md).
 
-For more details on field level details, [check out here][fields.md].
+For more details on field level details, [check out here](fields.md).
 
 For a full example, check out the `/resources` folder in this repo.
