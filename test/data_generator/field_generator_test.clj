@@ -201,16 +201,16 @@
     (is (instance? java.lang.Boolean (coerce :true :boolean)))
     (is (= true (coerce :true :boolean))))
   (testing "datetime"
-    (is (instance? org.joda.time.DateTime (coerce (t/date-time 2016 3 20) :timestamp-with-time-zone)))
-    (is (= (t/date-time 2016 3 20) (coerce (t/date-time 2016 3 20) :timestamp-with-time-zone)))
-    (is (instance? org.joda.time.DateTime (coerce 1458432000000 :timestamp-with-time-zone)))
-    (is (= (t/date-time 2016 3 20) (coerce 1458432000000 :timestamp-with-time-zone)))
-    (is (instance? org.joda.time.DateTime (coerce "1458432000000" :timestamp-with-time-zone)))
-    (is (= (t/date-time 2016 3 20) (coerce "1458432000000" :timestamp-with-time-zone)))
-    (is (instance? org.joda.time.DateTime (coerce :1458432000000 :timestamp-with-time-zone)))
-    (is (= (t/date-time 2016 3 20) (coerce :1458432000000 :timestamp-with-time-zone)))
-    (is (instance? org.joda.time.DateTime (coerce "2016-03-20" :timestamp-with-time-zone)))
-    (is (= (t/date-time 2016 3 20) (coerce "2016-03-20" :timestamp-with-time-zone)))))
+    (is (integer? (coerce (t/date-time 2016 3 20) :timestamp-with-time-zone)))
+    (is (= 1458432000000 (coerce (t/date-time 2016 3 20) :timestamp-with-time-zone)))
+    (is (integer? (coerce 1458432000000 :timestamp-with-time-zone)))
+    (is (= 1458432000000 (coerce 1458432000000 :timestamp-with-time-zone)))
+    (is (integer? (coerce "1458432000000" :timestamp-with-time-zone)))
+    (is (= 1458432000000 (coerce "1458432000000" :timestamp-with-time-zone)))
+    (is (integer? (coerce :1458432000000 :timestamp-with-time-zone)))
+    (is (= 1458432000000 (coerce :1458432000000 :timestamp-with-time-zone)))
+    (is (integer? (coerce "2016-03-20" :timestamp-with-time-zone)))
+    (is (= 1458432000000 (coerce "2016-03-20" :timestamp-with-time-zone)))))
 
 (deftest coerce-sql-test
   (testing "not-time"
