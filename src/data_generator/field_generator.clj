@@ -39,9 +39,9 @@
            (if (#{:text} ftype) ;; edn/read-string errors on strings that start with a digit
              str-value
              (if (#{:date :datetime :timestamp-with-time-zone} ftype)
-               (if (re-find #"^\d+$" str-value)
-                 (c/from-long (-> str-value edn/read-string long))
-                 (c/from-string str-value))
+               (if (re-find #"^\d+(?:\.\d+)?(?:E\d+)?$" str-value)
+                 (-> str-value edn/read-string long)
+                 (-> str-value c/from-string c/to-long))
                (let [read-value (edn/read-string str-value)]
                  (cond
                    (#{:integer :serial} ftype) (int read-value)
@@ -158,7 +158,8 @@
               properties (current-properties properties (:iteration other))
               calculated (calculate-formula (:equation properties) this model more)
               randomness (resolve-references (:randomness properties) this model)
-              randomized (randomize-value calculated randomness)]
+              randomized (coerce (randomize-value calculated randomness) type-norm)]
+          ;; (println calculated randomized)
           {:this (assoc this mkey randomized)
            :models model})
         (catch Exception e (do (error "Formula Error" mkey this model)

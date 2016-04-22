@@ -23,6 +23,7 @@
                              [:this :dummy-key])))))
 
 (deftest wrap-modifier-time-component-test
+  (require '[clj-time.core :as t]) ;; Required to be included in run-time namespace
   (testing "hour"
     (is (= 12 (get-in ((wrap-modifier {:format "time-component"
                                        :function "hour"}
