@@ -65,7 +65,9 @@
 (defn str->primitive
   [string]
   (if ((complement instance?) java.lang.String string)
-    string ;; not really a string
+    (if (number? string)
+      (double string) ;; Normalize for possibly equality test
+      string)
     (if-let [number (re-find #"^\d+(?:\.\d+)?(?:E\d+)?$" string)]
       (Double/parseDouble number)
       (symbol string))))
@@ -138,6 +140,7 @@
                             (first primitives))
                           (catch Exception e (do (error "PROBLEM" equation (into '() primitives) this model)
                                                  (throw e))))]
+      ;; (println equation equation-resolved primitives calculated)
       calculated)))
 
 (defn randomize-value
