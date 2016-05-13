@@ -414,20 +414,22 @@
                                 (-> (clojure.walk/prewalk #(resolve-references % this models) filter-prepped)
                                     (normalize-where type-map)
                                     construct-where))
-            result (first (cond
-                            (and weight constructed-where) (query-filtered-weighted config
-                                                                                    table
-                                                                                    constructed-where
-                                                                                    weight
-                                                                                    field)
-                            constructed-where (query-filtered config
-                                                              table
-                                                              constructed-where)
-                            weight (query-weighted config
-                                                   table
-                                                   weight
-                                                   field)
-                            :default (query config table)))
+            result (try (first (cond
+                                 (and weight constructed-where) (query-filtered-weighted config
+                                                                                         table
+                                                                                         constructed-where
+                                                                                         weight
+                                                                                         field)
+                                 constructed-where (query-filtered config
+                                                                   table
+                                                                   constructed-where)
+                                 weight (query-weighted config
+                                                        table
+                                                        weight
+                                                        field)
+                                 :default (query config table)))
+                        (catch Exception e (do (error this models table constructed-where (list* filter-prepped) weight field)
+                                               (throw e))))
             _ (when-not result
                 (info "NONE!" table constructed-where (into '() filter-prepped) weight field))
             fixed-dates (reduce-kv (fn [m k v]

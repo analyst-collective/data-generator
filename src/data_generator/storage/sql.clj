@@ -81,7 +81,7 @@
        [:* (sql/as '(random) :random_col_for_sorting)]
        (sql/from table-name)
                                         ; TODO support OR/AND criteria
-       (sql/where (filter->where-criteria filter-list))
+       (sql/where filter-list)
        (sql/order-by :random_col_for_sorting)
        (sql/limit 1))))
 
