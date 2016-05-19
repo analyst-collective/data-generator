@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [cheshire.core :as json]
             [clojure.string :as s]
+            [clojure.tools.logging :as log]
             [data-generator.config :as conf]
             [data-generator.dependency-resolution :as dep]
             [data-generator.generator-factory :as build]
@@ -23,8 +24,8 @@
                            storage/storage-prep)
         dependencies (dep/resolve-deps config-prepped)]
     (storage/create-tables config-prepped)
-    (println "DEPENDENCIES" dependencies)
-    (println "PREPPED CONFIG" config-prepped)
+    (log/info "DEPENDENCIES" dependencies)
+    (log/info "PREPPED CONFIG" config-prepped)
     (-> config-prepped
         (build/generators dependencies)
         (generator/generate dependencies)
@@ -37,6 +38,6 @@
         file-name (or (-> args first) "config.json")
         config (conf/load-json file-name)]
     (if-not config
-      (println file-name "not found. Exiting without running. Please supply a valid path to a config file.")
+      (log/info file-name "not found. Exiting without running. Please supply a valid path to a config file.")
       (generate-data config))
-    (println "Completed running in" (- (System/currentTimeMillis) start) "milliseconds.")))
+    (log/info "Completed running in" (- (System/currentTimeMillis) start) "milliseconds.")))
